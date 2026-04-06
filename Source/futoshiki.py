@@ -286,8 +286,9 @@ def dpll_forward_chaining(clauses, assignment):
         
     # Bước 2: Rẽ nhánh (Branching) nếu Forward Chaining bị "kẹt"
     # Chọn một biến bất kỳ chưa được gán (ở đây lấy biến đầu tiên của mệnh đề đầu tiên)
-    chosen_var = abs(simplified_clauses[0][0])
-    
+    shortest_clause = min(simplified_clauses, key=len)
+    chosen_var = abs(shortest_clause[0])
+
     # Thử giả sử biến này True (Đưa vào KB như một sự kiện/mệnh đề đơn mới)
     status_true, final_assign_true = dpll_forward_chaining(simplified_clauses + [[chosen_var]], new_assignment)
     if status_true:
@@ -321,7 +322,7 @@ if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 2. Tạo đường dẫn tuyệt đối đến file input
-    input_file = os.path.join(script_dir, "Inputs", "input-09.txt")
+    input_file = os.path.join(script_dir, "Inputs", "input-10.txt")
     
     try:
         # Bước 1: Đọc dữ liệu
