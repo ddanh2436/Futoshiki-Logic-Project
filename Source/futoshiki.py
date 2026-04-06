@@ -1,4 +1,6 @@
 import os
+import copy
+
 
 def read_futoshiki_input(file_path):
     """Đọc dữ liệu từ file input Futoshiki."""
@@ -29,247 +31,236 @@ def read_futoshiki_input(file_path):
     return N, grid, horiz_constraints, vert_constraints
 
 def get_var_id(i, j, v, N):
-    """
-    Ánh xạ tọa độ (hàng i, cột j, giá trị v) thành một số nguyên duy nhất cho chuẩn CNF.
-    Lưu ý: i, j, v trong công thức toán học bắt đầu từ 1.
-    """
+    """Ánh xạ tọa độ (hàng i, cột j, giá trị v) thành một số nguyên duy nhất cho chuẩn CNF."""
     return (i - 1) * N**2 + (j - 1) * N + v
 
 def generate_A1_at_least_one(N):
-    """
-    A1: Mỗi ô có ít nhất một giá trị.
-    CNF: Val(i, j, 1) OR Val(i, j, 2) OR ... OR Val(i, j, N)
-    """
     clauses = []
     for i in range(1, N + 1):
         for j in range(1, N + 1):
-            # Tạo một mệnh đề chứa tất cả các giá trị v có thể có của ô (i, j)
             clause = [get_var_id(i, j, v, N) for v in range(1, N + 1)]
             clauses.append(clause)
     return clauses
 
 def generate_A2_at_most_one(N):
-    """
-    A2: Mỗi ô có tối đa một giá trị.
-    CNF: ~Val(i, j, v1) OR ~Val(i, j, v2) (với mọi v1 != v2)
-    """
     clauses = []
     for i in range(1, N + 1):
         for j in range(1, N + 1):
             for v1 in range(1, N + 1):
-                # Tối ưu: v2 bắt đầu từ v1 + 1 để tránh trùng lặp và tránh xét v1 == v2
                 for v2 in range(v1 + 1, N + 1):
                     clause = [-get_var_id(i, j, v1, N), -get_var_id(i, j, v2, N)]
                     clauses.append(clause)
     return clauses
 
 def generate_A3_value_in_bounds(N):
-    """
-    A3: Giá trị v phải nằm trong khoảng từ 1 đến N.
-    CNF 1: ~Val(i, j, v) V Less(0, v)
-    CNF 2: ~Val(i, j, v) V Less(v, N+1)
-    """
     clauses = []
     for i in range(1, N + 1):
         for j in range(1, N + 1):
             for v in range(1, N + 1):
-                
-                # Mệnh đề 1: ~Val(i, j, v) V Less(0, v)
-                # Ý nghĩa code: Nếu điều kiện Less(0, v) là Sai, ta phải cấm Val(i, j, v)
                 if not (0 < v):
                     clauses.append([-get_var_id(i, j, v, N)])
-                
-                # Mệnh đề 2: ~Val(i, j, v) V Less(v, N + 1)
-                # Ý nghĩa code: Nếu điều kiện Less(v, N+1) là Sai, ta cũng phải cấm Val(i, j, v)
                 if not (v < N + 1):
                     clauses.append([-get_var_id(i, j, v, N)])
-                    
     return clauses
 
 def generate_A4_maintain_given_values(N, grid):
-    """
-    A4: Duy trì các giá trị đã cho.
-    Nếu ô (i, j) đã có giá trị v trong grid, thì Val(i, j, v) phải đúng.
-    """
     clauses = []
     for i in range(1, N + 1):
         for j in range(1, N + 1):
             v = grid[i - 1][j - 1]
-            if v != 0:  # Nếu ô đã có giá trị (không phải 0)
-                clause = [get_var_id(i, j, v, N)]  # Val(i, j, v) phải đúng
+            if v != 0:
+                clause = [get_var_id(i, j, v, N)]
                 clauses.append(clause)
     return clauses
 
 def generate_A5_row_uniqueness(N):
-    """
-    A5: Tính duy nhất của hàng. 
-    Không có 2 ô trên cùng 1 hàng có cùng giá trị.
-    """
     clauses = []
     for i in range(1, N + 1):
         for v in range(1, N + 1):
             for j1 in range(1, N + 1):
                 for j2 in range(j1 + 1, N + 1):
-                    # CNF: ~Val(i, j1, v) OR ~Val(i, j2, v)
                     clause = [-get_var_id(i, j1, v, N), -get_var_id(i, j2, v, N)]
                     clauses.append(clause)
     return clauses
 
 def generate_A6_col_uniqueness(N):
-    """
-    A6: Tính duy nhất của cột. Không có 2 ô trên cùng 1 cột có cùng giá trị.
-    CNF: ~Val(i1, j, v) OR ~Val(i2, j, v) (với mọi i1 != i2)
-    """
     clauses = []
     for j in range(1, N + 1):
         for v in range(1, N + 1):
             for i1 in range(1, N + 1):
-                # Tương tự A5, i2 bắt đầu từ i1 + 1
                 for i2 in range(i1 + 1, N + 1):
                     clause = [-get_var_id(i1, j, v, N), -get_var_id(i2, j, v, N)]
                     clauses.append(clause)
     return clauses
 
 def generate_A7_less_h(N, horiz_constraints):
-    """
-    A7: Ràng buộc nhỏ hơn theo chiều ngang.
-    Chỉ xét nếu horiz_constraints tại tọa độ đó là 1 (ô trái < ô phải).
-    CNF: ~Val(i, j, v1) OR ~Val(i, j+1, v2) (áp dụng để CẤM các trường hợp v1 >= v2)
-    """
     clauses = []
     for r in range(N):
-        for c in range(N - 1): # Chiều ngang chỉ có N-1 ràng buộc giữa N cột
+        for c in range(N - 1):
             if horiz_constraints[r][c] == 1:
-                row = r + 1        # Tọa độ i
-                col_left = c + 1   # Tọa độ j
-                col_right = c + 2  # Tọa độ j+1
-                
+                row, col_left, col_right = r + 1, c + 1, c + 2
                 for v1 in range(1, N + 1):
                     for v2 in range(1, N + 1):
-                        # Cấm các tổ hợp giá trị vi phạm (v1 lớn hơn hoặc bằng v2)
                         if v1 >= v2:
                             clause = [-get_var_id(row, col_left, v1, N), -get_var_id(row, col_right, v2, N)]
                             clauses.append(clause)
     return clauses
 
 def generate_A8_horizontal_greater(N, horiz_constraints):
-    """
-    A8: Ràng buộc lớn hơn theo chiều ngang.
-    Nếu horiz_constraints tại tọa độ đó là 1 (ô trái > ô phải).
-    """
     clauses = []
     for r in range(N):
         for c in range(N - 1):
             if horiz_constraints[r][c] == -1:
-                row = r + 1          # Tọa độ i
-                col_left = c + 1     # Tọa độ j
-                col_right = c + 2    # Tọa độ j+1
-                
+                row, col_left, col_right = r + 1, c + 1, c + 2
                 for v1 in range(1, N + 1):
                     for v2 in range(1, N + 1):
-                        # Nếu v1 <= v2 thì đây là tổ hợp vi phạm luật, ta cần cấm (phủ định) nó
                         if v1 <= v2:
-                            # CNF: ~Val(row, col_left, v1) OR ~Val(row, col_right, v2)
                             clause = [-get_var_id(row, col_left, v1, N), -get_var_id(row, col_right, v2, N)]
                             clauses.append(clause)
     return clauses
 
 def generate_A9_vertical_less(N, vert_constraints):
-    """
-    A9: Ràng buộc nhỏ hơn theo chiều dọc.
-    Nếu vert_constraints tại tọa độ đó là 1 (ô trên < ô dưới).
-    """
     clauses = []
     for r in range(N - 1):
         for c in range(N):
             if vert_constraints[r][c] == 1:
-                row_top = r + 1      # Tọa độ i
-                row_bottom = r + 2   # Tọa độ i+1
-                col = c + 1          # Tọa độ j
-                
+                row_top, row_bottom, col = r + 1, r + 2, c + 1
                 for v1 in range(1, N + 1):
                     for v2 in range(1, N + 1):
-                        # Nếu v1 >= v2 thì đây là tổ hợp vi phạm luật, ta cần cấm (phủ định) nó
                         if v1 >= v2:
-                            # CNF: ~Val(row_top, col, v1) OR ~Val(row_bottom, col, v2)
                             clause = [-get_var_id(row_top, col, v1, N), -get_var_id(row_bottom, col, v2, N)]
                             clauses.append(clause)
     return clauses
 
 def generate_A10_greater_v(N, vert_constraints):
-    """
-    A10: Ràng buộc lớn hơn theo chiều dọc.
-    Nếu vert_constraints tại tọa độ đó là -1 (ô trên > ô dưới).
-    """
     clauses = []
     for r in range(N - 1):
         for c in range(N):
             if vert_constraints[r][c] == -1:
-                row_top = r + 1      # Tọa độ i
-                row_bottom = r + 2   # Tọa độ i+1
-                col = c + 1          # Tọa độ j
-                
+                row_top, row_bottom, col = r + 1, r + 2, c + 1
                 for v1 in range(1, N + 1):
                     for v2 in range(1, N + 1):
-                        # Nếu v1 <= v2 thì đây là tổ hợp vi phạm luật, ta cần cấm (phủ định) nó
                         if v1 <= v2:
-                            # CNF: ~Val(row_top, col, v1) OR ~Val(row_bottom, col, v2)
                             clause = [-get_var_id(row_top, col, v1, N), -get_var_id(row_bottom, col, v2, N)]
                             clauses.append(clause)
     return clauses
 
-# --- CHƯƠNG TRÌNH CHÍNH ---
+
+def find_empty_location(grid, N):
+    """Tìm ô trống đầu tiên trong ma trận (trái sang phải, trên xuống dưới)."""
+    for i in range(N):
+        for j in range(N):
+            if grid[i][j] == 0:
+                return (i, j)
+    return None
+
+def is_safe(grid, row, col, num, N, horiz, vert):
+    """Kiểm tra xem việc điền 'num' vào tọa độ (row, col) có hợp lệ không."""
+    # 1. Tiên đề A5 (Duy nhất hàng)
+    for j in range(N):
+        if grid[row][j] == num:
+            return False
+
+    # 2. Tiên đề A6 (Duy nhất cột)
+    for i in range(N):
+        if grid[i][col] == num:
+            return False
+
+    # 3. Tiên đề A7, A8 (Ràng buộc ngang)
+    if col > 0 and grid[row][col - 1] != 0:
+        if horiz[row][col - 1] == 1 and not (grid[row][col - 1] < num): return False
+        if horiz[row][col - 1] == -1 and not (grid[row][col - 1] > num): return False
+
+    if col < N - 1 and grid[row][col + 1] != 0:
+        if horiz[row][col] == 1 and not (num < grid[row][col + 1]): return False
+        if horiz[row][col] == -1 and not (num > grid[row][col + 1]): return False
+
+    # 4. Tiên đề A9, A10 (Ràng buộc dọc)
+    if row > 0 and grid[row - 1][col] != 0:
+        if vert[row - 1][col] == 1 and not (grid[row - 1][col] < num): return False
+        if vert[row - 1][col] == -1 and not (grid[row - 1][col] > num): return False
+
+    if row < N - 1 and grid[row + 1][col] != 0:
+        if vert[row][col] == 1 and not (num < grid[row + 1][col]): return False
+        if vert[row][col] == -1 and not (num > grid[row + 1][col]): return False
+
+    return True
+
+def solve_backtracking(grid, N, horiz, vert):
+    """Hàm đệ quy để giải lưới Futoshiki bằng Backtracking."""
+    empty_pos = find_empty_location(grid, N)
+    if not empty_pos:
+        return True # Đã giải xong
+        
+    row, col = empty_pos
+
+    for num in range(1, N + 1):
+        if is_safe(grid, row, col, num, N, horiz, vert):
+            grid[row][col] = num
+            if solve_backtracking(grid, N, horiz, vert):
+                return True
+            grid[row][col] = 0 # Quay lui
+            
+    return False
+
+def print_solution(grid, N, horiz, vert):
+    """In ma trận kết quả kèm theo các dấu bất đẳng thức."""
+    for r in range(N):
+        row_str = ""
+        for c in range(N):
+            row_str += f"{grid[r][c]:2d} "
+            if c < N - 1:
+                if horiz[r][c] == 1: row_str += "< "
+                elif horiz[r][c] == -1: row_str += "> "
+                else: row_str += "  "
+        print(row_str)
+        
+        if r < N - 1:
+            vert_str = ""
+            for c in range(N):
+                if vert[r][c] == 1: vert_str += " ^   "
+                elif vert[r][c] == -1: vert_str += " v   "
+                else: vert_str += "     "
+            print(vert_str)
+
 if __name__ == "__main__":
+    # Đảm bảo đường dẫn file chính xác với cấu trúc thư mục của bạn
     input_file = os.path.join("Inputs", "input-01.txt")
     
     try:
-        # Bước 1: Đọc dữ liệu từ file
+        # Bước 1: Đọc dữ liệu
         N, grid, horiz, vert = read_futoshiki_input(input_file)
         
         print(f"Kích thước ma trận N = {N}")
-        print("Đọc dữ liệu thành công! Đang chuyển sang tạo Knowledge Base...")
+        print("Đọc dữ liệu thành công!\n")
         
-        # Bước 2: Sinh các tập mệnh đề (Clauses) cho Knowledge Base
-        print("\n--- BẮT ĐẦU SINH MÃ CNF ---")
-
-        a1_clauses = generate_A1_at_least_one(N)
-        print(f"[A1] Số lượng mệnh đề sinh ra (ít nhất 1 giá trị): {len(a1_clauses)}")
-
-        a2_clauses = generate_A2_at_most_one(N)
-        print(f"[A2] Số lượng mệnh đề sinh ra (tối đa 1 giá trị): {len(a2_clauses)}")
+        # Bước 2: Sinh Knowledge Base (CNF)
+        print("--- ĐANG SINH MÃ CNF CHO KNOWLEDGE BASE ---")
+        a1 = generate_A1_at_least_one(N)
+        a2 = generate_A2_at_most_one(N)
+        a3 = generate_A3_value_in_bounds(N)
+        a4 = generate_A4_maintain_given_values(N, grid)
+        a5 = generate_A5_row_uniqueness(N)
+        a6 = generate_A6_col_uniqueness(N)
+        a7 = generate_A7_less_h(N, horiz)
+        a8 = generate_A8_horizontal_greater(N, horiz)
+        a9 = generate_A9_vertical_less(N, vert)
+        a10 = generate_A10_greater_v(N, vert)
         
-        a3_clauses = generate_A3_value_in_bounds(N)
-        print(f"[A3] Giới hạn giá trị 1 đến N: {len(a3_clauses)} mệnh đề")
+        KB = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10
+        print(f"Hoàn tất! Tổng số mệnh đề (clauses) trong KB: {len(KB)}\n")
         
-        a4_clauses = generate_A4_maintain_given_values(N, grid)
-        print(f"[A4] Giữ nguyên các ô cho sẵn: {len(a4_clauses)} mệnh đề")
-
-        a5_clauses = generate_A5_row_uniqueness(N)
-        print(f"[A5] Tính duy nhất của hàng: {len(a5_clauses)} mệnh đề")
-        if len(a5_clauses) > 0: print(f"     Ví dụ: {a5_clauses[0]}")
-
-        a6_clauses = generate_A6_col_uniqueness(N)
-        print(f"[A6] Số lượng mệnh đề sinh ra (duy nhất cột): {len(a6_clauses)}")
-
-        a7_clauses = generate_A7_less_h(N, horiz)
-        print(f"[A7] Số lượng mệnh đề sinh ra (ràng buộc '<' ngang): {len(a7_clauses)}")
+        # Bước 3: Giải bài toán bằng Backtracking
+        print("--- KẾT QUẢ GIẢI BẰNG THUẬT TOÁN BACKTRACKING ---")
+        grid_to_solve = copy.deepcopy(grid)
         
-        a8_clauses = generate_A8_horizontal_greater(N, horiz)
-        print(f"[A8] Ràng buộc '>' ngang: {len(a8_clauses)} mệnh đề")
-        if len(a8_clauses) > 0: print(f"     Ví dụ: {a8_clauses[0]}")
-            
-        a9_clauses = generate_A9_vertical_less(N, vert)
-        print(f"[A9] Ràng buộc '<' dọc: {len(a9_clauses)} mệnh đề")
-        if len(a9_clauses) > 0: print(f"     Ví dụ: {a9_clauses[0]}")
+        is_solved = solve_backtracking(grid_to_solve, N, horiz, vert)
         
-        a10_clauses = generate_A10_greater_v(N, vert)
-        print(f"[A10] Ràng buộc '>' dọc: {len(a10_clauses)} mệnh đề")
-        if len(a10_clauses) > 0: print(f"     Ví dụ: {a10_clauses[0]}")
-            
-        # Gộp tất cả vào một Knowledge Base chung
-        KB = a1_clauses + a2_clauses + a3_clauses + a4_clauses + a5_clauses + a6_clauses + a7_clauses + a8_clauses + a9_clauses + a10_clauses
-        print(f"\n--- TỔNG KẾT ---")
-        print(f"Tổng số mệnh đề (clauses) hiện có trong KB: {len(KB)}")
+        if is_solved:
+            print("Đã tìm thấy giải pháp!\n")
+            print_solution(grid_to_solve, N, horiz, vert)
+        else:
+            print("Không tìm thấy giải pháp nào cho cấu hình này!")
             
     except FileNotFoundError:
         print(f"Lỗi: Không tìm thấy file tại đường dẫn {input_file}. Hãy kiểm tra lại cấu trúc thư mục!")
