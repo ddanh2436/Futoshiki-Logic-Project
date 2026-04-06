@@ -1,6 +1,6 @@
 import os
 import copy
-
+import time
 
 def read_futoshiki_input(file_path):
     """Đọc dữ liệu từ file input Futoshiki."""
@@ -223,9 +223,105 @@ def print_solution(grid, N, horiz, vert):
                 else: vert_str += "     "
             print(vert_str)
 
+def unit_propagate(clauses, assignment):
+    """
+    Thuật toán Forward Chaining (Lan truyền đơn vị).
+    Rút gọn tập mệnh đề dựa trên các sự kiện (mệnh đề đơn) đã biết.
+    """
+    clauses_copy = [c[:] for c in clauses]  
+    assignment_copy = assignment.copy()
+    
+    while True:
+        unit_clause = None
+        # 1. Tìm mệnh đề đơn (Sự kiện chắc chắn đúng)
+        for clause in clauses_copy:
+            if len(clause) == 1:
+                unit_clause = clause[0]
+                break
+        
+        # Nếu không còn mệnh đề đơn, dừng suy diễn
+        if unit_clause is None:
+            break
+            
+        var = abs(unit_clause)
+        val = True if unit_clause > 0 else False
+        
+        # 2. Kiểm tra mâu thuẫn
+        if var in assignment_copy and assignment_copy[var] != val:
+            return False, [], {} # Phát hiện mâu thuẫn
+            
+        assignment_copy[var] = val
+        
+        # 3. Lan truyền sự kiện mới (Propagate)
+        new_clauses = []
+        for clause in clauses_copy:
+            if unit_clause in clause:
+                continue # Mệnh đề đã đúng trọn vẹn -> Bỏ qua
+            elif -unit_clause in clause:
+                # Literal sai -> Xóa literal này khỏi mệnh đề
+                new_clause = [l for l in clause if l != -unit_clause]
+                if not new_clause: # Mệnh đề rỗng -> Mâu thuẫn
+                    return False, [], {}
+                new_clauses.append(new_clause)
+            else:
+                new_clauses.append(clause)
+                
+        clauses_copy = new_clauses
+        
+    return True, clauses_copy, assignment_copy
+
+def dpll_forward_chaining(clauses, assignment):
+    """
+    Kết hợp Forward Chaining và tìm kiếm quay lui (DPLL).
+    Đảm bảo giải quyết được mọi ma trận kích thước lớn.
+    """
+    # Bước 1: Lan truyền suy diễn tiến
+    status, simplified_clauses, new_assignment = unit_propagate(clauses, assignment)
+    
+    if not status:
+        return False, {} # Mâu thuẫn nhánh này, cần quay lui
+        
+    if not simplified_clauses:
+        return True, new_assignment # Đã thỏa mãn toàn bộ Knowledge Base
+        
+    # Bước 2: Rẽ nhánh (Branching) nếu Forward Chaining bị "kẹt"
+    # Chọn một biến bất kỳ chưa được gán (ở đây lấy biến đầu tiên của mệnh đề đầu tiên)
+    chosen_var = abs(simplified_clauses[0][0])
+    
+    # Thử giả sử biến này True (Đưa vào KB như một sự kiện/mệnh đề đơn mới)
+    status_true, final_assign_true = dpll_forward_chaining(simplified_clauses + [[chosen_var]], new_assignment)
+    if status_true:
+        return True, final_assign_true
+        
+    # Nếu True thất bại, thử False
+    status_false, final_assign_false = dpll_forward_chaining(simplified_clauses + [[-chosen_var]], new_assignment)
+    if status_false:
+        return True, final_assign_false
+        
+    return False, {}
+
+def extract_grid_from_assignment(assignment, N):
+    """
+    Dịch ngược kết quả biến logic (1 đến N^3) về lại ma trận N x N.
+    """
+    solved_grid = [[0 for _ in range(N)] for _ in range(N)]
+    for var, is_true in assignment.items():
+        if is_true:
+            # Dịch ngược công thức get_var_id
+            temp = var - 1
+            v = (temp % N) + 1
+            temp = temp // N
+            j = (temp % N) + 1
+            i = (temp // N) + 1
+            solved_grid[i - 1][j - 1] = v
+    return solved_grid
+
 if __name__ == "__main__":
-    # Đảm bảo đường dẫn file chính xác với cấu trúc thư mục của bạn
-    input_file = os.path.join("Inputs", "input-01.txt")
+    # 1. Lấy thư mục chứa file futoshiki.py hiện tại
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 2. Tạo đường dẫn tuyệt đối đến file input
+    input_file = os.path.join(script_dir, "Inputs", "input-09.txt")
     
     try:
         # Bước 1: Đọc dữ liệu
@@ -234,33 +330,62 @@ if __name__ == "__main__":
         print(f"Kích thước ma trận N = {N}")
         print("Đọc dữ liệu thành công!\n")
         
-        # Bước 2: Sinh Knowledge Base (CNF)
+        # Bước 2: Sinh Knowledge Base (CNF) chung cho Forward Chaining
         print("--- ĐANG SINH MÃ CNF CHO KNOWLEDGE BASE ---")
-        a1 = generate_A1_at_least_one(N)
-        a2 = generate_A2_at_most_one(N)
-        a3 = generate_A3_value_in_bounds(N)
-        a4 = generate_A4_maintain_given_values(N, grid)
-        a5 = generate_A5_row_uniqueness(N)
-        a6 = generate_A6_col_uniqueness(N)
-        a7 = generate_A7_less_h(N, horiz)
-        a8 = generate_A8_horizontal_greater(N, horiz)
-        a9 = generate_A9_vertical_less(N, vert)
-        a10 = generate_A10_greater_v(N, vert)
+        KB = []
+        KB.extend(generate_A1_at_least_one(N))
+        KB.extend(generate_A2_at_most_one(N))
+        KB.extend(generate_A3_value_in_bounds(N))
+        KB.extend(generate_A4_maintain_given_values(N, grid))
+        KB.extend(generate_A5_row_uniqueness(N))
+        KB.extend(generate_A6_col_uniqueness(N))
+        KB.extend(generate_A7_less_h(N, horiz))
+        KB.extend(generate_A8_horizontal_greater(N, horiz))
+        KB.extend(generate_A9_vertical_less(N, vert))
+        KB.extend(generate_A10_greater_v(N, vert))
         
-        KB = a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10
         print(f"Hoàn tất! Tổng số mệnh đề (clauses) trong KB: {len(KB)}\n")
         
-        # Bước 3: Giải bài toán bằng Backtracking
-        print("--- KẾT QUẢ GIẢI BẰNG THUẬT TOÁN BACKTRACKING ---")
-        grid_to_solve = copy.deepcopy(grid)
+        # ==============================================================
+        # PHẦN 1: GIẢI BẰNG THUẬT TOÁN BACKTRACKING
+        # ==============================================================
+        print("="*60)
+        print("1. KẾT QUẢ GIẢI BẰNG THUẬT TOÁN BACKTRACKING")
+        print("="*60)
         
-        is_solved = solve_backtracking(grid_to_solve, N, horiz, vert)
+        # Tạo một bản sao của grid để Backtracking không làm hỏng dữ liệu gốc
+        grid_to_solve_bt = copy.deepcopy(grid)
         
-        if is_solved:
-            print("Đã tìm thấy giải pháp!\n")
-            print_solution(grid_to_solve, N, horiz, vert)
+        start_time_bt = time.time()
+        is_solved_bt = solve_backtracking(grid_to_solve_bt, N, horiz, vert)
+        end_time_bt = time.time()
+        
+        if is_solved_bt:
+            print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_bt - start_time_bt:.5f} giây)\n")
+            print_solution(grid_to_solve_bt, N, horiz, vert)
         else:
             print("Không tìm thấy giải pháp nào cho cấu hình này!")
+
+        print("\n")
+
+        # ==============================================================
+        # PHẦN 2: GIẢI BẰNG THUẬT TOÁN FORWARD CHAINING (DPLL)
+        # ==============================================================
+        print("="*60)
+        print("2. KẾT QUẢ GIẢI BẰNG FORWARD CHAINING (DPLL)")
+        print("="*60)
+        
+        start_time_fc = time.time()
+        # Gọi hàm DPLL với KB ban đầu và tập gán (assignment) rỗng
+        is_solved_fc, final_assignment = dpll_forward_chaining(KB, {})
+        end_time_fc = time.time()
+        
+        if is_solved_fc:
+            print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_fc - start_time_fc:.5f} giây)\n")
+            solved_grid_fc = extract_grid_from_assignment(final_assignment, N)
+            print_solution(solved_grid_fc, N, horiz, vert)
+        else:
+            print("Không tìm thấy giải pháp nào cho cấu hình này (Có thể KB chứa mâu thuẫn)!")
             
     except FileNotFoundError:
         print(f"Lỗi: Không tìm thấy file tại đường dẫn {input_file}. Hãy kiểm tra lại cấu trúc thư mục!")
