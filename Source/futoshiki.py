@@ -300,6 +300,76 @@ def dpll_forward_chaining(clauses, assignment):
         return True, final_assign_false
         
     return False, {}
+def build_horn_kb(clauses):
+    """
+    Tiền xử lý: Chuyển đổi tập CNF thành dạng từ điển Luật Horn để Suy diễn lùi dễ truy xuất.
+    Cấu trúc: KB_Dict[Head] = [Body1, Body2, ...] (Mỗi Body là một danh sách các điều kiện)
+    """
+    horn_kb = {}
+    for clause in clauses:
+        pos_lits = [l for l in clause if l > 0]
+        neg_lits = [-l for l in clause if l < 0]
+        
+        # Chỉ lấy các mệnh đề Horn (có đúng 1 literal khẳng định làm "Head")
+        if len(pos_lits) == 1:
+            head = pos_lits[0]
+            if head not in horn_kb:
+                horn_kb[head] = []
+            # Thêm phần "Body" (tiền đề) vào danh sách các cách để chứng minh "Head"
+            horn_kb[head].append(neg_lits)
+            
+    return horn_kb
+
+def fol_bc_ask(horn_kb, query_list, visited=None):
+    """
+    Thuật toán Suy diễn lùi (Backward Chaining) mô phỏng SLD Resolution.
+    Tương đương với hàm FOL-BC-ASK trong sách giáo trình.
+    
+    :param horn_kb: Cơ sở tri thức dạng luật Horn.
+    :param query_list: (truy-vấn) Danh sách các mục tiêu cần chứng minh.
+    :param visited: Tập hợp các node đã duyệt để chống lặp vòng vô hạn.
+    :return: True nếu chứng minh thành công, False nếu thất bại.
+    """
+    if visited is None:
+        visited = set()
+
+    # if truy-vấn rỗng then return thành công (Tất cả mục tiêu đã được chứng minh)
+    if not query_list:
+        return True
+
+    # Lấy câu hỏi đích đầu tiên (q')
+    q = query_list[0]
+    rest_query = query_list[1:]
+
+    # Chống lặp: Nếu mục tiêu này đang nằm trong chuỗi chứng minh hiện tại, bỏ qua
+    if q in visited:
+        return False
+
+    visited.add(q)
+
+    # for each câu r in KB trong đó phần kết luận đồng nhất với q
+    if q in horn_kb:
+        for body in horn_kb[q]:
+            # truy-vấn-mới <- [Phần tiền đề của r, Phần còn lại của truy vấn]
+            new_query_list = body + rest_query
+            
+            # Đệ quy giải quyết truy vấn mới
+            if fol_bc_ask(horn_kb, new_query_list, visited.copy()):
+                return True
+
+    visited.remove(q)
+    return False
+
+def query_cell_backward_chaining(KB, i, j, v, N):
+    """
+    Hàm giao tiếp: Truy vấn xem ô (i, j) có thể chắc chắn mang giá trị v hay không.
+    """
+    target_var = get_var_id(i, j, v, N)
+    horn_kb = build_horn_kb(KB)
+    
+    # Bắt đầu truy vấn với mục tiêu duy nhất là target_var
+    result = fol_bc_ask(horn_kb, [target_var])
+    return result
 
 def extract_grid_from_assignment(assignment, N):
     """
@@ -390,3 +460,25 @@ if __name__ == "__main__":
             
     except FileNotFoundError:
         print(f"Lỗi: Không tìm thấy file tại đường dẫn {input_file}. Hãy kiểm tra lại cấu trúc thư mục!")
+        
+        # ==============================================================
+        # PHẦN 3: DEMO TRUY VẤN BẰNG BACKWARD CHAINING (PROLOG-STYLE)
+        # ==============================================================
+        print("\n" + "="*60)
+        print("3. KẾT QUẢ TRUY VẤN BẰNG BACKWARD CHAINING")
+        print("="*60)
+        
+        # Ví dụ: Thử truy vấn giá trị của một ô đã cho sẵn (Given Clue)
+        # Em có thể lấy tọa độ của một ô có số > 0 trong file input để test
+        test_i, test_j = 1, 1 
+        test_v = grid[test_i - 1][test_j - 1] 
+        
+        if test_v != 0:
+            print(f"Đang truy vấn (SLD Resolution) xem Val({test_i}, {test_j}) có phải là {test_v} không...")
+            is_proven = query_cell_backward_chaining(KB, test_i, test_j, test_v, N)
+            
+            if is_proven:
+                print(f"-> SUY DIỄN THÀNH CÔNG: Val({test_i}, {test_j}, {test_v}) là ĐÚNG dựa trên KB.")
+            else:
+                print(f"-> THẤT BẠI: Không thể chứng minh bằng Backward Chaining.")
+
