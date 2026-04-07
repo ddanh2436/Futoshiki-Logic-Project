@@ -1,6 +1,7 @@
 import os
 import copy
 import time
+import heapq  # Thêm thư viện hàng đợi ưu tiên cho thuật toán A*
 
 # =============================================================================
 # PHẦN 1: CÁC HÀM XỬ LÝ ĐẦU VÀO / ĐẦU RA (I/O)
@@ -188,7 +189,6 @@ def generate_A10_greater_v(N, vert_constraints):
 # =============================================================================
 
 def find_empty_location(grid, N):
-    """Tìm ô trống đầu tiên trong ma trận (trái sang phải, trên xuống dưới)."""
     for i in range(N):
         for j in range(N):
             if grid[i][j] == 0:
@@ -196,7 +196,6 @@ def find_empty_location(grid, N):
     return None
 
 def is_safe(grid, row, col, num, N, horiz, vert):
-    """Kiểm tra luật an toàn cơ bản (không dùng CNF)."""
     for j in range(N):
         if grid[row][j] == num: return False
     for i in range(N):
@@ -221,7 +220,6 @@ def is_safe(grid, row, col, num, N, horiz, vert):
     return True
 
 def solve_backtracking(grid, N, horiz, vert):
-    """Giải Futoshiki bằng Backtracking mảng truyền thống."""
     empty_pos = find_empty_location(grid, N)
     if not empty_pos: return True 
         
@@ -239,7 +237,6 @@ def solve_backtracking(grid, N, horiz, vert):
 # =============================================================================
 
 def unit_propagate(clauses, assignment):
-    """Lan truyền sự kiện chắc chắn đúng để cắt tỉa logic (Forward Chaining)."""
     clauses_copy = [c[:] for c in clauses]  
     assignment_copy = assignment.copy()
     
@@ -277,7 +274,6 @@ def unit_propagate(clauses, assignment):
     return True, clauses_copy, assignment_copy
 
 def dpll_forward_chaining(clauses, assignment):
-    """Khung thuật toán DPLL."""
     status, simplified_clauses, new_assignment = unit_propagate(clauses, assignment)
     
     if not status: return False, {} 
@@ -299,7 +295,6 @@ def dpll_forward_chaining(clauses, assignment):
 # =============================================================================
 
 def build_horn_kb(clauses):
-    """Trích xuất các mệnh đề Horn (đặc biệt là Fact) để chuẩn bị truy vấn."""
     horn_kb = {}
     for clause in clauses:
         pos_lits = [l for l in clause if l > 0]
@@ -314,7 +309,6 @@ def build_horn_kb(clauses):
     return horn_kb
 
 def fol_bc_ask(horn_kb, query_list, visited=None):
-    """Thuật toán Suy diễn lùi (SLD Resolution) nguyên bản."""
     if visited is None: visited = set()
     if not query_list: return True
 
@@ -334,13 +328,85 @@ def fol_bc_ask(horn_kb, query_list, visited=None):
     return False
 
 def query_cell_backward_chaining(KB, i, j, v, N):
-    """Dùng Backward Chaining để hỏi: Val(i, j) có phải là v không?"""
     target_var = get_var_id(i, j, v, N)
     horn_kb = build_horn_kb(KB)
     return fol_bc_ask(horn_kb, [target_var])
 
 # =============================================================================
-# PHẦN 6: CHƯƠNG TRÌNH CHÍNH (MAIN EXECUTION)
+# PHẦN 6: THUẬT TOÁN 4 - A* SEARCH KẾT HỢP HEURISTIC
+# =============================================================================
+
+def find_mrv_empty_location(grid, N, horiz, vert):
+    """Tìm ô trống có ít lựa chọn nhất (MRV) để giúp A* mở rộng trạng thái thông minh hơn."""
+    best_pos = None
+    min_options = N + 1
+    
+    for r in range(N):
+        for c in range(N):
+            if grid[r][c] == 0:
+                options = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
+                if options < min_options:
+                    min_options = options
+                    best_pos = (r, c)
+                    if min_options == 0:
+                        return best_pos # Trả về ngay nếu có ô 0 lựa chọn
+    return best_pos
+
+def heuristic_A_star(grid, N, horiz, vert):
+    """
+    Hàm Heuristic h(n) dùng để đánh giá trạng thái.
+    Trả về số ô trống. Nếu có ô nào bị khóa (0 lựa chọn), trả về vô cực để cắt tỉa.
+    """
+    empty_count = 0
+    for r in range(N):
+        for c in range(N):
+            if grid[r][c] == 0:
+                empty_count += 1
+                possible_values = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
+                if possible_values == 0:
+                    return float('inf') # Vô nghiệm chắc chắn
+    return empty_count
+
+def solve_astar(initial_grid, N, horiz, vert):
+    """Giải Futoshiki bằng thuật toán A* Search."""
+    initial_g = sum(1 for r in range(N) for c in range(N) if initial_grid[r][c] != 0)
+    initial_h = heuristic_A_star(initial_grid, N, horiz, vert)
+    
+    if initial_h == float('inf'):
+        return False, None, 0
+        
+    pq = []
+    # Lưu tuple: (f_score, -g_score, grid)
+    heapq.heappush(pq, (initial_g + initial_h, -initial_g, initial_grid))
+    
+    nodes_expanded = 0 
+    
+    while pq:
+        f, neg_g, current_grid = heapq.heappop(pq)
+        g = -neg_g
+        nodes_expanded += 1
+        
+        empty_pos = find_mrv_empty_location(current_grid, N, horiz, vert)
+        if not empty_pos:
+            return True, current_grid, nodes_expanded
+            
+        row, col = empty_pos
+        
+        for num in range(1, N + 1):
+            if is_safe(current_grid, row, col, num, N, horiz, vert):
+                child_grid = [r[:] for r in current_grid]
+                child_grid[row][col] = num
+                
+                child_g = g + 1
+                child_h = heuristic_A_star(child_grid, N, horiz, vert)
+                
+                if child_h != float('inf'):
+                    heapq.heappush(pq, (child_g + child_h, -child_g, child_grid))
+                    
+    return False, None, nodes_expanded
+
+# =============================================================================
+# PHẦN 7: CHƯƠNG TRÌNH CHÍNH (MAIN EXECUTION)
 # =============================================================================
 
 if __name__ == "__main__":
@@ -384,7 +450,7 @@ if __name__ == "__main__":
         
         if is_solved_bt:
             print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_bt - start_time_bt:.5f} giây)\n")
-            print_solution(grid_to_solve_bt, N, horiz, vert)
+            print_solution(grid_to_solve_bt, N, horiz, vert) # Tạm ẩn để gọn output
         else:
             print("Không tìm thấy giải pháp nào cho cấu hình này!")
 
@@ -402,7 +468,7 @@ if __name__ == "__main__":
         if is_solved_fc:
             print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_fc - start_time_fc:.5f} giây)\n")
             solved_grid_fc = extract_grid_from_assignment(final_assignment, N)
-            print_solution(solved_grid_fc, N, horiz, vert)
+            print_solution(solved_grid_fc, N, horiz, vert) # Tạm ẩn để gọn output
         else:
             print("Không tìm thấy giải pháp nào cho cấu hình này (Có thể KB chứa mâu thuẫn)!")
             
@@ -413,7 +479,6 @@ if __name__ == "__main__":
         print("3. KẾT QUẢ TRUY VẤN BẰNG BACKWARD CHAINING")
         print("="*60)
         
-        # Tự động quét tìm một ô đã cho sẵn số (Given Clue) để làm test case truy vấn
         test_i, test_j, test_v = -1, -1, 0
         for r in range(N):
             for c in range(N):
@@ -434,6 +499,25 @@ if __name__ == "__main__":
                 print(f"-> THẤT BẠI: Không thể chứng minh bằng Backward Chaining.")
         else:
             print("Ma trận này trống hoàn toàn, không có số mồi nào để test truy vấn!")
+
+        # -------------------------------------------------------------
+        # THUẬT TOÁN 4: A* SEARCH VỚI HEURISTIC
+        # -------------------------------------------------------------
+        print("\n" + "="*60)
+        print("4. KẾT QUẢ GIẢI BẰNG A* SEARCH VỚI HEURISTIC")
+        print("="*60)
+        
+        grid_to_solve_astar = copy.deepcopy(grid)
+        start_time_astar = time.time()
+        is_solved_astar, final_grid_astar, nodes_expanded = solve_astar(grid_to_solve_astar, N, horiz, vert)
+        end_time_astar = time.time()
+        
+        if is_solved_astar:
+            print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_astar - start_time_astar:.5f} giây)")
+            print(f"Số trạng thái (nodes) đã mở rộng: {nodes_expanded}\n")
+            print_solution(final_grid_astar, N, horiz, vert) # Chỉ in full ma trận cho phần này
+        else:
+            print("Không tìm thấy giải pháp nào cho cấu hình này!")
 
     except FileNotFoundError:
         print(f"Lỗi: Không tìm thấy file tại đường dẫn {input_file}. Hãy kiểm tra lại cấu trúc thư mục!")
