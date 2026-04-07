@@ -1,7 +1,8 @@
 import os
 import copy
 import time
-import heapq  # Thêm thư viện hàng đợi ưu tiên cho thuật toán A*
+import heapq  # Dùng cho hàng đợi ưu tiên của A*
+import itertools # THÊM MỚI: Dùng để tạo bộ đếm ID cho A*
 
 # =============================================================================
 # PHẦN 1: CÁC HÀM XỬ LÝ ĐẦU VÀO / ĐẦU RA (I/O)
@@ -376,13 +377,16 @@ def solve_astar(initial_grid, N, horiz, vert):
         return False, None, 0
         
     pq = []
-    # Lưu tuple: (f_score, -g_score, grid)
-    heapq.heappush(pq, (initial_g + initial_h, -initial_g, initial_grid))
+    tie_breaker = itertools.count() # ĐÃ THÊM: Bộ đếm tự động tăng ID tránh lỗi so sánh ma trận
+    
+    # ĐÃ SỬA: Thêm next(tie_breaker) vào vị trí tuple thứ 3
+    heapq.heappush(pq, (initial_g + initial_h, -initial_g, next(tie_breaker), initial_grid))
     
     nodes_expanded = 0 
     
     while pq:
-        f, neg_g, current_grid = heapq.heappop(pq)
+        # ĐÃ SỬA: Dùng _ để bỏ qua ID khi pop phần tử ra
+        f, neg_g, _, current_grid = heapq.heappop(pq)
         g = -neg_g
         nodes_expanded += 1
         
@@ -401,7 +405,8 @@ def solve_astar(initial_grid, N, horiz, vert):
                 child_h = heuristic_A_star(child_grid, N, horiz, vert)
                 
                 if child_h != float('inf'):
-                    heapq.heappush(pq, (child_g + child_h, -child_g, child_grid))
+                    # ĐÃ SỬA: Thêm next(tie_breaker) khi push node con vào hàng đợi
+                    heapq.heappush(pq, (child_g + child_h, -child_g, next(tie_breaker), child_grid))
                     
     return False, None, nodes_expanded
 
