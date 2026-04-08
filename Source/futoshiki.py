@@ -4,6 +4,7 @@ import time
 import heapq
 import itertools
 import glob
+import tracemalloc
 
 # =============================================================================
 # PHẦN 1: CÁC HÀM XỬ LÝ ĐẦU VÀO / ĐẦU RA (I/O)
@@ -53,17 +54,25 @@ def print_solution(grid, N, horiz, vert):
                 else: vert_str += "     "
             print(vert_str)
 
-def extract_grid_from_assignment(assignment, N):
-    solved_grid = [[0 for _ in range(N)] for _ in range(N)]
-    for var, is_true in assignment.items():
-        if is_true and var > 0:
-            temp = var - 1
-            v = (temp % N) + 1
-            temp = temp // N
-            j = (temp % N) + 1
-            i = (temp // N) + 1
-            solved_grid[i - 1][j - 1] = v
-    return solved_grid
+def write_solution_to_file(grid, N, horiz, vert, filepath):
+    with open(filepath, 'w') as f:
+        for r in range(N):
+            row_str = ""
+            for c in range(N):
+                row_str += f"{grid[r][c]:2d} "
+                if c < N - 1:
+                    if horiz[r][c] == 1: row_str += "< "
+                    elif horiz[r][c] == -1: row_str += "> "
+                    else: row_str += "  "
+            f.write(row_str + "\n")
+            
+            if r < N - 1:
+                vert_str = ""
+                for c in range(N):
+                    if vert[r][c] == 1: vert_str += " ^   "
+                    elif vert[r][c] == -1: vert_str += " v   "
+                    else: vert_str += "     "
+                f.write(vert_str + "\n")
 
 # =============================================================================
 # PHẦN 2: CÁC HÀM SINH MÃ CNF (KNOWLEDGE BASE)
@@ -151,7 +160,7 @@ def build_full_kb(N, grid, horiz, vert):
     return KB
 
 # =============================================================================
-# CÁC HÀM TIỆN ÍCH
+# CÁC HÀM TIỆN ÍCH CHUNG
 # =============================================================================
 
 def find_empty_location(grid, N):
@@ -181,22 +190,48 @@ def is_safe(grid, row, col, num, N, horiz, vert):
     return True
 
 # =============================================================================
-# THUẬT TOÁN 1: BACKTRACKING
+# BENCHMARK WRAPPER (ĐO TIME & RAM)
+# =============================================================================
+def run_benchmark(func, *args):
+    """Hàm bọc để đo RAM và Thời gian thực thi của một hàm thuật toán"""
+    tracemalloc.start()
+    start_time = time.perf_counter()
+    
+    result = func(*args)
+    
+    end_time = time.perf_counter()
+    exec_time = end_time - start_time
+    
+    current_ram, peak_ram = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    peak_ram_mb = peak_ram / (1024 * 1024)
+    
+    return result, exec_time, peak_ram_mb
+
+# =============================================================================
+# THUẬT TOÁN 1: BACKTRACKING (KÈM ĐẾM NODE)
 # =============================================================================
 
-def solve_backtracking(grid, N, horiz, vert):
-    empty_pos = find_empty_location(grid, N)
-    if not empty_pos: return True 
-    row, col = empty_pos
-    for num in range(1, N + 1):
-        if is_safe(grid, row, col, num, N, horiz, vert):
-            grid[row][col] = num
-            if solve_backtracking(grid, N, horiz, vert): return True
-            grid[row][col] = 0 
-    return False
+def run_backtracking(grid, N, horiz, vert):
+    stats = [0] # List để truyền tham chiếu đếm node
+    
+    def solve_bt(curr_grid):
+        stats[0] += 1
+        empty_pos = find_empty_location(curr_grid, N)
+        if not empty_pos: return True 
+        row, col = empty_pos
+        for num in range(1, N + 1):
+            if is_safe(curr_grid, row, col, num, N, horiz, vert):
+                curr_grid[row][col] = num
+                if solve_bt(curr_grid): return True
+                curr_grid[row][col] = 0 
+        return False
+        
+    res = solve_bt(grid)
+    return res, stats[0]
 
 # =============================================================================
-# THUẬT TOÁN 2: FORWARD CHAINING (DPLL)
+# THUẬT TOÁN 2: FORWARD CHAINING (DPLL KÈM ĐẾM SUY DIỄN)
 # =============================================================================
 
 def unit_propagate(clauses, assignment):
@@ -235,22 +270,32 @@ def unit_propagate(clauses, assignment):
         clauses_copy = new_clauses
     return True, clauses_copy, assignment_copy
 
-def dpll_forward_chaining(clauses, assignment):
-    status, simplified_clauses, new_assignment = unit_propagate(clauses, assignment)
-    if not status: return False, {} 
-    if not simplified_clauses: return True, new_assignment 
-        
-    shortest_clause = min(simplified_clauses, key=len)
-    chosen_var = abs(shortest_clause[0])
+def run_dpll(clauses):
+    stats = [0] # Đếm số nhánh DPLL
+    
+    def dpll_recursive(cls, asn):
+        stats[0] += 1
+        status, simplified_clauses, new_assignment = unit_propagate(cls, asn)
+        if not status: return False, {} 
+        if not simplified_clauses: return True, new_assignment 
+            
+        shortest_clause = min(simplified_clauses, key=len)
+        chosen_var = abs(shortest_clause[0])
 
-    if dpll_forward_chaining(simplified_clauses + [[chosen_var]], new_assignment)[0]: 
-        return True, dpll_forward_chaining(simplified_clauses + [[chosen_var]], new_assignment)[1]
-    if dpll_forward_chaining(simplified_clauses + [[-chosen_var]], new_assignment)[0]: 
-        return True, dpll_forward_chaining(simplified_clauses + [[-chosen_var]], new_assignment)[1]
-    return False, {}
+        # Sửa lỗi: Gán biến tạm thay vì gọi đệ quy 2 lần giống code cũ
+        res1, asn1 = dpll_recursive(simplified_clauses + [[chosen_var]], new_assignment)
+        if res1: return True, asn1
+        
+        res2, asn2 = dpll_recursive(simplified_clauses + [[-chosen_var]], new_assignment)
+        if res2: return True, asn2
+        
+        return False, {}
+
+    res, final_asn = dpll_recursive(clauses, {})
+    return res, final_asn, stats[0]
 
 # =============================================================================
-# THUẬT TOÁN 3: BACKWARD CHAINING (GIỮ NGUYÊN BẢN GỐC CỦA NHÓM)
+# THUẬT TOÁN 3: BACKWARD CHAINING (PROLOG STYLE)
 # =============================================================================
 
 def build_horn_kb(clauses):
@@ -265,89 +310,96 @@ def build_horn_kb(clauses):
             horn_kb[head].append(neg_lits)
     return horn_kb
 
-def fol_bc_ask(horn_kb, query_list, visited=None):
-    if visited is None: visited = set()
-    if not query_list: return True
-    q = query_list[0]
-    rest_query = query_list[1:]
-    if q in visited: return False
-    visited.add(q)
-    if q in horn_kb:
-        for body in horn_kb[q]:
-            new_query_list = body + rest_query
-            if fol_bc_ask(horn_kb, new_query_list, visited.copy()):
-                return True
-    visited.remove(q)
-    return False
-
-def query_cell_backward_chaining(KB, i, j, v, N):
-    target_var = get_var_id(i, j, v, N)
+def run_backward_chaining(KB, i, j, v, N):
     horn_kb = build_horn_kb(KB)
-    return fol_bc_ask(horn_kb, [target_var])
+    target_var = get_var_id(i, j, v, N)
+    stats = [0] # Đếm số phép suy diễn lùi
+    
+    def fol_bc_ask(query_list, visited):
+        stats[0] += 1
+        if not query_list: return True
+        q = query_list[0]
+        rest_query = query_list[1:]
+        if q in visited: return False
+        visited.add(q)
+        if q in horn_kb:
+            for body in horn_kb[q]:
+                new_query_list = body + rest_query
+                if fol_bc_ask(new_query_list, visited.copy()):
+                    return True
+        visited.remove(q)
+        return False
+        
+    res = fol_bc_ask([target_var], set())
+    return res, stats[0]
 
-# =============================================================================
-# THUẬT TOÁN 4: A* SEARCH KẾT HỢP HEURISTIC
-# =============================================================================
 
-def find_mrv_empty_location(grid, N, horiz, vert):
-    best_pos = None
-    min_options = N + 1
-    for r in range(N):
-        for c in range(N):
-            if grid[r][c] == 0:
-                options = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
-                if options < min_options:
-                    min_options = options
-                    best_pos = (r, c)
-                    if min_options == 0: return best_pos 
-    return best_pos
-
-def heuristic_A_star(grid, N, horiz, vert):
+def get_heuristic_and_mrv(grid, N, horiz, vert):
     empty_count = 0
+    min_options = N + 1
+    best_pos = None
+
     for r in range(N):
         for c in range(N):
             if grid[r][c] == 0:
                 empty_count += 1
-                possible_values = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
-                if possible_values == 0: return float('inf') 
-    return empty_count
+                # Đếm số giá trị hợp lệ (Forward Checking)
+                options = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
+                
+                if options == 0:
+                    return float('inf'), None  # Nhánh vô nghiệm, cắt tỉa ngay
+                
+                if options < min_options:
+                    min_options = options
+                    best_pos = (r, c)
+                    
+    return empty_count, best_pos
 
-def solve_astar(initial_grid, N, horiz, vert):
+def run_astar(initial_grid, N, horiz, vert):
     initial_g = sum(1 for r in range(N) for c in range(N) if initial_grid[r][c] != 0)
-    initial_h = heuristic_A_star(initial_grid, N, horiz, vert)
+    initial_h, initial_mrv = get_heuristic_and_mrv(initial_grid, N, horiz, vert)
+    
     if initial_h == float('inf'): return False, None, 0
         
     pq = []
     tie_breaker = itertools.count() 
-    heapq.heappush(pq, (initial_g + initial_h, -initial_g, next(tie_breaker), initial_grid))
+    # MẸO: Lưu sẵn initial_mrv vào tuple để khỏi phải tính lại
+    heapq.heappush(pq, (initial_g + initial_h, -initial_g, next(tie_breaker), initial_grid, initial_mrv))
     nodes_expanded = 0 
     
     while pq:
-        f, neg_g, _, current_grid = heapq.heappop(pq)
+        # Lấy trực tiếp empty_pos từ queue
+        f, neg_g, _, current_grid, empty_pos = heapq.heappop(pq)
         g = -neg_g
         nodes_expanded += 1
-        empty_pos = find_mrv_empty_location(current_grid, N, horiz, vert)
+        
         if not empty_pos: return True, current_grid, nodes_expanded
+        
         row, col = empty_pos
         for num in range(1, N + 1):
             if is_safe(current_grid, row, col, num, N, horiz, vert):
                 child_grid = [r[:] for r in current_grid]
                 child_grid[row][col] = num
                 child_g = g + 1
-                child_h = heuristic_A_star(child_grid, N, horiz, vert)
+                
+                # Tính trước thông số cho node con
+                child_h, child_mrv = get_heuristic_and_mrv(child_grid, N, horiz, vert)
+                
                 if child_h != float('inf'):
-                    heapq.heappush(pq, (child_g + child_h, -child_g, next(tie_breaker), child_grid))
+                    heapq.heappush(pq, (child_g + child_h, -child_g, next(tie_breaker), child_grid, child_mrv))
+                    
     return False, None, nodes_expanded
 
-# =============================================================================
-# PHẦN MAIN: TỰ ĐỘNG CHẠY TẤT CẢ TEST CASES VÀ THỐNG KÊ
-# =============================================================================
+
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     input_folder = os.path.join(script_dir, "Inputs")
+    output_folder = os.path.join(script_dir, "Outputs")
     
-    # Lấy danh sách tất cả các file input-*.txt và sắp xếp
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
     input_files = sorted(glob.glob(os.path.join(input_folder, "input-*.txt")))
     
     if not input_files:
@@ -355,8 +407,7 @@ if __name__ == "__main__":
         exit()
 
     results = []
-
-    print("BẮT ĐẦU CHẠY KIỂM THỬ TRÊN TẤT CẢ TEST CASES...\n")
+    print("BẮT ĐẦU CHẠY KIỂM THỬ VÀ ĐO LƯỜNG HIỆU NĂNG...\n")
 
     for file_path in input_files:
         filename = os.path.basename(file_path)
@@ -364,24 +415,17 @@ if __name__ == "__main__":
         
         print(f"[{filename}] - Kích thước {N}x{N} - Đang xử lý...")
         
-        # Sinh KB chung
-        t_start_kb = time.time()
+        # --- Gen KB ---
         KB = build_full_kb(N, grid, horiz, vert)
-        t_kb = time.time() - t_start_kb
 
         # 1. Backtracking
         grid_bt = copy.deepcopy(grid)
-        t_start = time.time()
-        res_bt = solve_backtracking(grid_bt, N, horiz, vert)
-        t_bt = time.time() - t_start
+        (res_bt, nodes_bt), t_bt, ram_bt = run_benchmark(run_backtracking, grid_bt, N, horiz, vert)
         
         # 2. Forward Chaining (DPLL)
-        t_start = time.time()
-        res_fc, _ = dpll_forward_chaining(KB, {})
-        t_fc = time.time() - t_start
+        (res_fc, _, nodes_fc), t_fc, ram_fc = run_benchmark(run_dpll, KB)
 
-        # 3. Backward Chaining (Test 1 ô mồi như code gốc)
-        t_start = time.time()
+        # 3. Backward Chaining (Test 1 ô mồi)
         test_i, test_j, test_v = -1, -1, 0
         for r in range(N):
             for c in range(N):
@@ -390,50 +434,65 @@ if __name__ == "__main__":
                     break
             if test_v != 0: break
         
-        res_bc = False
         if test_v != 0:
-            res_bc = query_cell_backward_chaining(KB, test_i, test_j, test_v, N)
-        t_bc = time.time() - t_start
+            (res_bc, nodes_bc), t_bc, ram_bc = run_benchmark(run_backward_chaining, KB, test_i, test_j, test_v, N)
+        else:
+            t_bc, ram_bc, nodes_bc = 0, 0, 0
 
         # 4. A* Search
         grid_astar = copy.deepcopy(grid)
-        t_start = time.time()
-        res_astar, _, nodes_expanded = solve_astar(grid_astar, N, horiz, vert)
-        t_astar = time.time() - t_start
+        (res_astar, final_grid_astar, nodes_astar), t_astar, ram_astar = run_benchmark(run_astar, grid_astar, N, horiz, vert)
         
-        # Lưu kết quả
+        # Ghi file Output (Lấy theo kết quả của A*)
+        if res_astar:
+            out_filename = filename.replace("input-", "output-")
+            out_filepath = os.path.join(output_folder, out_filename)
+            write_solution_to_file(final_grid_astar, N, horiz, vert, out_filepath)
+            print(f"--> Đã tìm thấy nghiệm & lưu vào: Outputs/{out_filename}")
+        else:
+            print("--> Ma trận vô nghiệm.")
+        
+        # Lưu số liệu
         results.append({
-            "File": filename,
-            "Size": f"{N}x{N}",
-            "Gen KB": t_kb,
-            "BT Time": t_bt,
-            "FC Time": t_fc,
-            "BC Time": t_bc,
-            "A* Time": t_astar,
-            "A* Nodes": nodes_expanded
+            "File": filename, "Size": f"{N}x{N}",
+            "BT": (t_bt, ram_bt, nodes_bt),
+            "FC": (t_fc, ram_fc, nodes_fc),
+            "BC": (t_bc, ram_bc, nodes_bc),
+            "AStar": (t_astar, ram_astar, nodes_astar)
         })
-        print(f"--> Hoàn tất {filename}\n")
+        print("-" * 50)
 
     # =========================================================================
-    # IN BẢNG TỔNG KẾT
+    # IN BẢNG TỔNG KẾT SIÊU RỘNG (TIME / RAM / NODES)
     # =========================================================================
-    print("="*105)
-    print(f"{'BẢNG TỔNG KẾT THỜI GIAN CHẠY CÁC THUẬT TOÁN (giây)':^105}")
-    print("="*105)
-    header = f"{'File':<15} | {'Size':<6} | {'Gen KB':<10} | {'Backtracking':<15} | {'Forward Chaining':<18} | {'Backward Chaining':<18} | {'A* Search':<12}"
+    # T(s) = Time in seconds | R(MB) = Peak RAM in MB | Nodes = Nodes expanded / Inferences made
+    
+    print("\n" + "="*160)
+    print(f"{'BẢNG TỔNG KẾT HIỆU NĂNG THUẬT TOÁN (THỜI GIAN / RAM / NODES)':^160}")
+    print("="*160)
+    
+    header = f"{'File':<15} | {'Size':<6} | " \
+             f"{'BT: T(s)':<10} | {'R(MB)':<8} | {'Nodes':<8} | " \
+             f"{'FC: T(s)':<10} | {'R(MB)':<8} | {'Nodes':<8} | " \
+             f"{'BC: T(s)':<10} | {'R(MB)':<8} | {'Nodes':<8} | " \
+             f"{'A*: T(s)':<10} | {'R(MB)':<8} | {'Nodes':<8}"
     print(header)
-    print("-" * 105)
+    print("-" * 160)
     
     for r in results:
-        row_str = (
-            f"{r['File']:<15} | "
-            f"{r['Size']:<6} | "
-            f"{r['Gen KB']:<10.4f} | "
-            f"{r['BT Time']:<15.5f} | "
-            f"{r['FC Time']:<18.5f} | "
-            f"{r['BC Time']:<18.5f} | "
-            f"{r['A* Time']:<12.5f}"
-        )
+        # Unpack dữ liệu
+        bt_t, bt_r, bt_n = r["BT"]
+        fc_t, fc_r, fc_n = r["FC"]
+        bc_t, bc_r, bc_n = r["BC"]
+        as_t, as_r, as_n = r["AStar"]
+        
+        row_str = f"{r['File']:<15} | {r['Size']:<6} | " \
+                  f"{bt_t:<10.4f} | {bt_r:<8.3f} | {bt_n:<8} | " \
+                  f"{fc_t:<10.4f} | {fc_r:<8.3f} | {fc_n:<8} | " \
+                  f"{bc_t:<10.4f} | {bc_r:<8.3f} | {bc_n:<8} | " \
+                  f"{as_t:<10.4f} | {as_r:<8.3f} | {as_n:<8}"
         print(row_str)
-    print("="*105)
-    print("* Lưu ý: Thời gian Backward Chaining trong bảng này là thời gian truy vấn 1 ô mồi đầu tiên tìm thấy.")
+        
+    print("="*160)
+    print("* T(s): Thời gian chạy (giây) | R(MB): Đỉnh RAM tiêu thụ (Megabyte) | Nodes: Số node đã duyệt hoặc phép suy diễn logic.")
+    print("* Backward Chaining (BC) chỉ đo lường thời gian truy vấn để kiểm tra 1 ô mồi đầu tiên được tìm thấy.")
