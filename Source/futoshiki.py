@@ -1,18 +1,17 @@
 import os
 import copy
 import time
-import heapq  # Dùng cho hàng đợi ưu tiên của A*
-import itertools # THÊM MỚI: Dùng để tạo bộ đếm ID cho A*
+import heapq
+import itertools
+import glob
 
 # =============================================================================
 # PHẦN 1: CÁC HÀM XỬ LÝ ĐẦU VÀO / ĐẦU RA (I/O)
 # =============================================================================
 
 def read_futoshiki_input(file_path):
-    """Đọc dữ liệu từ file input Futoshiki."""
     with open(file_path, 'r') as f:
         lines = [line.strip() for line in f if line.strip()]
-    
     N = int(lines[0])
     current_line = 1
     
@@ -37,7 +36,6 @@ def read_futoshiki_input(file_path):
     return N, grid, horiz_constraints, vert_constraints
 
 def print_solution(grid, N, horiz, vert):
-    """In ma trận kết quả kèm theo các dấu bất đẳng thức."""
     for r in range(N):
         row_str = ""
         for c in range(N):
@@ -47,7 +45,6 @@ def print_solution(grid, N, horiz, vert):
                 elif horiz[r][c] == -1: row_str += "> "
                 else: row_str += "  "
         print(row_str)
-        
         if r < N - 1:
             vert_str = ""
             for c in range(N):
@@ -57,10 +54,9 @@ def print_solution(grid, N, horiz, vert):
             print(vert_str)
 
 def extract_grid_from_assignment(assignment, N):
-    """Dịch ngược kết quả biến logic (1 đến N^3) về lại ma trận N x N."""
     solved_grid = [[0 for _ in range(N)] for _ in range(N)]
     for var, is_true in assignment.items():
-        if is_true:
+        if is_true and var > 0:
             temp = var - 1
             v = (temp % N) + 1
             temp = temp // N
@@ -77,22 +73,10 @@ def get_var_id(i, j, v, N):
     return (i - 1) * N**2 + (j - 1) * N + v
 
 def generate_A1_at_least_one(N):
-    clauses = []
-    for i in range(1, N + 1):
-        for j in range(1, N + 1):
-            clause = [get_var_id(i, j, v, N) for v in range(1, N + 1)]
-            clauses.append(clause)
-    return clauses
+    return [[get_var_id(i, j, v, N) for v in range(1, N + 1)] for i in range(1, N + 1) for j in range(1, N + 1)]
 
 def generate_A2_at_most_one(N):
-    clauses = []
-    for i in range(1, N + 1):
-        for j in range(1, N + 1):
-            for v1 in range(1, N + 1):
-                for v2 in range(v1 + 1, N + 1):
-                    clause = [-get_var_id(i, j, v1, N), -get_var_id(i, j, v2, N)]
-                    clauses.append(clause)
-    return clauses
+    return [[-get_var_id(i, j, v1, N), -get_var_id(i, j, v2, N)] for i in range(1, N + 1) for j in range(1, N + 1) for v1 in range(1, N + 1) for v2 in range(v1 + 1, N + 1)]
 
 def generate_A3_value_in_bounds(N):
     clauses = []
@@ -104,96 +88,76 @@ def generate_A3_value_in_bounds(N):
     return clauses
 
 def generate_A4_maintain_given_values(N, grid):
-    clauses = []
-    for i in range(1, N + 1):
-        for j in range(1, N + 1):
-            v = grid[i - 1][j - 1]
-            if v != 0:
-                clause = [get_var_id(i, j, v, N)]
-                clauses.append(clause)
-    return clauses
+    return [[get_var_id(i, j, grid[i-1][j-1], N)] for i in range(1, N + 1) for j in range(1, N + 1) if grid[i-1][j-1] != 0]
 
 def generate_A5_row_uniqueness(N):
-    clauses = []
-    for i in range(1, N + 1):
-        for v in range(1, N + 1):
-            for j1 in range(1, N + 1):
-                for j2 in range(j1 + 1, N + 1):
-                    clause = [-get_var_id(i, j1, v, N), -get_var_id(i, j2, v, N)]
-                    clauses.append(clause)
-    return clauses
+    return [[-get_var_id(i, j1, v, N), -get_var_id(i, j2, v, N)] for i in range(1, N + 1) for v in range(1, N + 1) for j1 in range(1, N + 1) for j2 in range(j1 + 1, N + 1)]
 
 def generate_A6_col_uniqueness(N):
-    clauses = []
-    for j in range(1, N + 1):
-        for v in range(1, N + 1):
-            for i1 in range(1, N + 1):
-                for i2 in range(i1 + 1, N + 1):
-                    clause = [-get_var_id(i1, j, v, N), -get_var_id(i2, j, v, N)]
-                    clauses.append(clause)
-    return clauses
+    return [[-get_var_id(i1, j, v, N), -get_var_id(i2, j, v, N)] for j in range(1, N + 1) for v in range(1, N + 1) for i1 in range(1, N + 1) for i2 in range(i1 + 1, N + 1)]
 
-def generate_A7_less_h(N, horiz_constraints):
+def generate_A7_less_h(N, horiz):
     clauses = []
     for r in range(N):
         for c in range(N - 1):
-            if horiz_constraints[r][c] == 1:
-                row, col_left, col_right = r + 1, c + 1, c + 2
+            if horiz[r][c] == 1:
                 for v1 in range(1, N + 1):
-                    for v2 in range(1, N + 1):
-                        if v1 >= v2:
-                            clause = [-get_var_id(row, col_left, v1, N), -get_var_id(row, col_right, v2, N)]
-                            clauses.append(clause)
+                    for v2 in range(1, v1 + 1):
+                        clauses.append([-get_var_id(r+1, c+1, v1, N), -get_var_id(r+1, c+2, v2, N)])
     return clauses
 
-def generate_A8_horizontal_greater(N, horiz_constraints):
+def generate_A8_horizontal_greater(N, horiz):
     clauses = []
     for r in range(N):
         for c in range(N - 1):
-            if horiz_constraints[r][c] == -1:
-                row, col_left, col_right = r + 1, c + 1, c + 2
+            if horiz[r][c] == -1:
                 for v1 in range(1, N + 1):
-                    for v2 in range(1, N + 1):
-                        if v1 <= v2:
-                            clause = [-get_var_id(row, col_left, v1, N), -get_var_id(row, col_right, v2, N)]
-                            clauses.append(clause)
+                    for v2 in range(v1, N + 1):
+                        clauses.append([-get_var_id(r+1, c+1, v1, N), -get_var_id(r+1, c+2, v2, N)])
     return clauses
 
-def generate_A9_vertical_less(N, vert_constraints):
+def generate_A9_vertical_less(N, vert):
     clauses = []
     for r in range(N - 1):
         for c in range(N):
-            if vert_constraints[r][c] == 1:
-                row_top, row_bottom, col = r + 1, r + 2, c + 1
+            if vert[r][c] == 1:
                 for v1 in range(1, N + 1):
-                    for v2 in range(1, N + 1):
-                        if v1 >= v2:
-                            clause = [-get_var_id(row_top, col, v1, N), -get_var_id(row_bottom, col, v2, N)]
-                            clauses.append(clause)
+                    for v2 in range(1, v1 + 1):
+                        clauses.append([-get_var_id(r+1, c+1, v1, N), -get_var_id(r+2, c+1, v2, N)])
     return clauses
 
-def generate_A10_greater_v(N, vert_constraints):
+def generate_A10_greater_v(N, vert):
     clauses = []
     for r in range(N - 1):
         for c in range(N):
-            if vert_constraints[r][c] == -1:
-                row_top, row_bottom, col = r + 1, r + 2, c + 1
+            if vert[r][c] == -1:
                 for v1 in range(1, N + 1):
-                    for v2 in range(1, N + 1):
-                        if v1 <= v2:
-                            clause = [-get_var_id(row_top, col, v1, N), -get_var_id(row_bottom, col, v2, N)]
-                            clauses.append(clause)
+                    for v2 in range(v1, N + 1):
+                        clauses.append([-get_var_id(r+1, c+1, v1, N), -get_var_id(r+2, c+1, v2, N)])
     return clauses
+
+def build_full_kb(N, grid, horiz, vert):
+    KB = []
+    KB.extend(generate_A1_at_least_one(N))
+    KB.extend(generate_A2_at_most_one(N))
+    KB.extend(generate_A3_value_in_bounds(N))
+    KB.extend(generate_A4_maintain_given_values(N, grid))
+    KB.extend(generate_A5_row_uniqueness(N))
+    KB.extend(generate_A6_col_uniqueness(N))
+    KB.extend(generate_A7_less_h(N, horiz))
+    KB.extend(generate_A8_horizontal_greater(N, horiz))
+    KB.extend(generate_A9_vertical_less(N, vert))
+    KB.extend(generate_A10_greater_v(N, vert))
+    return KB
 
 # =============================================================================
-# PHẦN 3: THUẬT TOÁN 1 - BACKTRACKING (QUAY LUI CƠ BẢN DỰA TRÊN LƯỚI)
+# CÁC HÀM TIỆN ÍCH
 # =============================================================================
 
 def find_empty_location(grid, N):
     for i in range(N):
         for j in range(N):
-            if grid[i][j] == 0:
-                return (i, j)
+            if grid[i][j] == 0: return (i, j)
     return None
 
 def is_safe(grid, row, col, num, N, horiz, vert):
@@ -205,36 +169,34 @@ def is_safe(grid, row, col, num, N, horiz, vert):
     if col > 0 and grid[row][col - 1] != 0:
         if horiz[row][col - 1] == 1 and not (grid[row][col - 1] < num): return False
         if horiz[row][col - 1] == -1 and not (grid[row][col - 1] > num): return False
-
     if col < N - 1 and grid[row][col + 1] != 0:
         if horiz[row][col] == 1 and not (num < grid[row][col + 1]): return False
         if horiz[row][col] == -1 and not (num > grid[row][col + 1]): return False
-
     if row > 0 and grid[row - 1][col] != 0:
         if vert[row - 1][col] == 1 and not (grid[row - 1][col] < num): return False
         if vert[row - 1][col] == -1 and not (grid[row - 1][col] > num): return False
-
     if row < N - 1 and grid[row + 1][col] != 0:
         if vert[row][col] == 1 and not (num < grid[row + 1][col]): return False
         if vert[row][col] == -1 and not (num > grid[row + 1][col]): return False
-
     return True
+
+# =============================================================================
+# THUẬT TOÁN 1: BACKTRACKING
+# =============================================================================
 
 def solve_backtracking(grid, N, horiz, vert):
     empty_pos = find_empty_location(grid, N)
     if not empty_pos: return True 
-        
     row, col = empty_pos
     for num in range(1, N + 1):
         if is_safe(grid, row, col, num, N, horiz, vert):
             grid[row][col] = num
             if solve_backtracking(grid, N, horiz, vert): return True
             grid[row][col] = 0 
-            
     return False
 
 # =============================================================================
-# PHẦN 4: THUẬT TOÁN 2 - FORWARD CHAINING (DPLL)
+# THUẬT TOÁN 2: FORWARD CHAINING (DPLL)
 # =============================================================================
 
 def unit_propagate(clauses, assignment):
@@ -271,12 +233,10 @@ def unit_propagate(clauses, assignment):
                 new_clauses.append(clause)
                 
         clauses_copy = new_clauses
-        
     return True, clauses_copy, assignment_copy
 
 def dpll_forward_chaining(clauses, assignment):
     status, simplified_clauses, new_assignment = unit_propagate(clauses, assignment)
-    
     if not status: return False, {} 
     if not simplified_clauses: return True, new_assignment 
         
@@ -285,14 +245,12 @@ def dpll_forward_chaining(clauses, assignment):
 
     if dpll_forward_chaining(simplified_clauses + [[chosen_var]], new_assignment)[0]: 
         return True, dpll_forward_chaining(simplified_clauses + [[chosen_var]], new_assignment)[1]
-        
     if dpll_forward_chaining(simplified_clauses + [[-chosen_var]], new_assignment)[0]: 
         return True, dpll_forward_chaining(simplified_clauses + [[-chosen_var]], new_assignment)[1]
-        
     return False, {}
 
 # =============================================================================
-# PHẦN 5: THUẬT TOÁN 3 - BACKWARD CHAINING TRUY VẤN Ô (PROLOG STYLE)
+# THUẬT TOÁN 3: BACKWARD CHAINING (GIỮ NGUYÊN BẢN GỐC CỦA NHÓM)
 # =============================================================================
 
 def build_horn_kb(clauses):
@@ -300,31 +258,25 @@ def build_horn_kb(clauses):
     for clause in clauses:
         pos_lits = [l for l in clause if l > 0]
         neg_lits = [-l for l in clause if l < 0]
-        
         if len(pos_lits) == 1:
             head = pos_lits[0]
             if head not in horn_kb:
                 horn_kb[head] = []
             horn_kb[head].append(neg_lits)
-            
     return horn_kb
 
 def fol_bc_ask(horn_kb, query_list, visited=None):
     if visited is None: visited = set()
     if not query_list: return True
-
     q = query_list[0]
     rest_query = query_list[1:]
-
     if q in visited: return False
     visited.add(q)
-
     if q in horn_kb:
         for body in horn_kb[q]:
             new_query_list = body + rest_query
             if fol_bc_ask(horn_kb, new_query_list, visited.copy()):
                 return True
-
     visited.remove(q)
     return False
 
@@ -334,14 +286,12 @@ def query_cell_backward_chaining(KB, i, j, v, N):
     return fol_bc_ask(horn_kb, [target_var])
 
 # =============================================================================
-# PHẦN 6: THUẬT TOÁN 4 - A* SEARCH KẾT HỢP HEURISTIC
+# THUẬT TOÁN 4: A* SEARCH KẾT HỢP HEURISTIC
 # =============================================================================
 
 def find_mrv_empty_location(grid, N, horiz, vert):
-    """Tìm ô trống có ít lựa chọn nhất (MRV) để giúp A* mở rộng trạng thái thông minh hơn."""
     best_pos = None
     min_options = N + 1
-    
     for r in range(N):
         for c in range(N):
             if grid[r][c] == 0:
@@ -349,180 +299,141 @@ def find_mrv_empty_location(grid, N, horiz, vert):
                 if options < min_options:
                     min_options = options
                     best_pos = (r, c)
-                    if min_options == 0:
-                        return best_pos # Trả về ngay nếu có ô 0 lựa chọn
+                    if min_options == 0: return best_pos 
     return best_pos
 
 def heuristic_A_star(grid, N, horiz, vert):
-    """
-    Hàm Heuristic h(n) dùng để đánh giá trạng thái.
-    Trả về số ô trống. Nếu có ô nào bị khóa (0 lựa chọn), trả về vô cực để cắt tỉa.
-    """
     empty_count = 0
     for r in range(N):
         for c in range(N):
             if grid[r][c] == 0:
                 empty_count += 1
                 possible_values = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
-                if possible_values == 0:
-                    return float('inf') # Vô nghiệm chắc chắn
+                if possible_values == 0: return float('inf') 
     return empty_count
 
 def solve_astar(initial_grid, N, horiz, vert):
-    """Giải Futoshiki bằng thuật toán A* Search."""
     initial_g = sum(1 for r in range(N) for c in range(N) if initial_grid[r][c] != 0)
     initial_h = heuristic_A_star(initial_grid, N, horiz, vert)
-    
-    if initial_h == float('inf'):
-        return False, None, 0
+    if initial_h == float('inf'): return False, None, 0
         
     pq = []
-    tie_breaker = itertools.count() # ĐÃ THÊM: Bộ đếm tự động tăng ID tránh lỗi so sánh ma trận
-    
-    # ĐÃ SỬA: Thêm next(tie_breaker) vào vị trí tuple thứ 3
+    tie_breaker = itertools.count() 
     heapq.heappush(pq, (initial_g + initial_h, -initial_g, next(tie_breaker), initial_grid))
-    
     nodes_expanded = 0 
     
     while pq:
-        # ĐÃ SỬA: Dùng _ để bỏ qua ID khi pop phần tử ra
         f, neg_g, _, current_grid = heapq.heappop(pq)
         g = -neg_g
         nodes_expanded += 1
-        
         empty_pos = find_mrv_empty_location(current_grid, N, horiz, vert)
-        if not empty_pos:
-            return True, current_grid, nodes_expanded
-            
+        if not empty_pos: return True, current_grid, nodes_expanded
         row, col = empty_pos
-        
         for num in range(1, N + 1):
             if is_safe(current_grid, row, col, num, N, horiz, vert):
                 child_grid = [r[:] for r in current_grid]
                 child_grid[row][col] = num
-                
                 child_g = g + 1
                 child_h = heuristic_A_star(child_grid, N, horiz, vert)
-                
                 if child_h != float('inf'):
-                    # ĐÃ SỬA: Thêm next(tie_breaker) khi push node con vào hàng đợi
                     heapq.heappush(pq, (child_g + child_h, -child_g, next(tie_breaker), child_grid))
-                    
     return False, None, nodes_expanded
 
 # =============================================================================
-# PHẦN 7: CHƯƠNG TRÌNH CHÍNH (MAIN EXECUTION)
+# PHẦN MAIN: TỰ ĐỘNG CHẠY TẤT CẢ TEST CASES VÀ THỐNG KÊ
 # =============================================================================
 
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    input_file = os.path.join(script_dir, "Inputs", "input-10.txt")
+    input_folder = os.path.join(script_dir, "Inputs")
     
-    try:
-        # Bước 1: Đọc dữ liệu
-        N, grid, horiz, vert = read_futoshiki_input(input_file)
-        print(f"Kích thước ma trận N = {N}")
-        print(f"Đang xử lý file: {os.path.basename(input_file)}")
-        print("Đọc dữ liệu thành công!\n")
-        
-        # Bước 2: Sinh Knowledge Base (CNF)
-        print("--- ĐANG SINH MÃ CNF CHO KNOWLEDGE BASE ---")
-        KB = []
-        KB.extend(generate_A1_at_least_one(N))
-        KB.extend(generate_A2_at_most_one(N))
-        KB.extend(generate_A3_value_in_bounds(N))
-        KB.extend(generate_A4_maintain_given_values(N, grid))
-        KB.extend(generate_A5_row_uniqueness(N))
-        KB.extend(generate_A6_col_uniqueness(N))
-        KB.extend(generate_A7_less_h(N, horiz))
-        KB.extend(generate_A8_horizontal_greater(N, horiz))
-        KB.extend(generate_A9_vertical_less(N, vert))
-        KB.extend(generate_A10_greater_v(N, vert))
-        
-        print(f"Hoàn tất! Tổng số mệnh đề (clauses) trong KB: {len(KB)}\n")
-        
-        # -------------------------------------------------------------
-        # THUẬT TOÁN 1: BACKTRACKING TRUYỀN THỐNG (TÌM KIẾM TOÀN BỘ MAP)
-        # -------------------------------------------------------------
-        print("="*60)
-        print("1. KẾT QUẢ GIẢI BẰNG THUẬT TOÁN BACKTRACKING")
-        print("="*60)
-        
-        grid_to_solve_bt = copy.deepcopy(grid)
-        start_time_bt = time.time()
-        is_solved_bt = solve_backtracking(grid_to_solve_bt, N, horiz, vert)
-        end_time_bt = time.time()
-        
-        if is_solved_bt:
-            print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_bt - start_time_bt:.5f} giây)\n")
-            print_solution(grid_to_solve_bt, N, horiz, vert) # Tạm ẩn để gọn output
-        else:
-            print("Không tìm thấy giải pháp nào cho cấu hình này!")
+    # Lấy danh sách tất cả các file input-*.txt và sắp xếp
+    input_files = sorted(glob.glob(os.path.join(input_folder, "input-*.txt")))
+    
+    if not input_files:
+        print(f"Không tìm thấy file input nào trong thư mục {input_folder}")
+        exit()
 
-        # -------------------------------------------------------------
-        # THUẬT TOÁN 2: FORWARD CHAINING / DPLL (TÌM KIẾM TOÀN BỘ MAP)
-        # -------------------------------------------------------------
-        print("\n" + "="*60)
-        print("2. KẾT QUẢ GIẢI BẰNG FORWARD CHAINING (DPLL)")
-        print("="*60)
+    results = []
+
+    print("BẮT ĐẦU CHẠY KIỂM THỬ TRÊN TẤT CẢ TEST CASES...\n")
+
+    for file_path in input_files:
+        filename = os.path.basename(file_path)
+        N, grid, horiz, vert = read_futoshiki_input(file_path)
         
-        start_time_fc = time.time()
-        is_solved_fc, final_assignment = dpll_forward_chaining(KB, {})
-        end_time_fc = time.time()
+        print(f"[{filename}] - Kích thước {N}x{N} - Đang xử lý...")
         
-        if is_solved_fc:
-            print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_fc - start_time_fc:.5f} giây)\n")
-            solved_grid_fc = extract_grid_from_assignment(final_assignment, N)
-            print_solution(solved_grid_fc, N, horiz, vert) # Tạm ẩn để gọn output
-        else:
-            print("Không tìm thấy giải pháp nào cho cấu hình này (Có thể KB chứa mâu thuẫn)!")
-            
-        # -------------------------------------------------------------
-        # THUẬT TOÁN 3: BACKWARD CHAINING (TRUY VẤN - PROLOG STYLE)
-        # -------------------------------------------------------------
-        print("\n" + "="*60)
-        print("3. KẾT QUẢ TRUY VẤN BẰNG BACKWARD CHAINING")
-        print("="*60)
+        # Sinh KB chung
+        t_start_kb = time.time()
+        KB = build_full_kb(N, grid, horiz, vert)
+        t_kb = time.time() - t_start_kb
+
+        # 1. Backtracking
+        grid_bt = copy.deepcopy(grid)
+        t_start = time.time()
+        res_bt = solve_backtracking(grid_bt, N, horiz, vert)
+        t_bt = time.time() - t_start
         
+        # 2. Forward Chaining (DPLL)
+        t_start = time.time()
+        res_fc, _ = dpll_forward_chaining(KB, {})
+        t_fc = time.time() - t_start
+
+        # 3. Backward Chaining (Test 1 ô mồi như code gốc)
+        t_start = time.time()
         test_i, test_j, test_v = -1, -1, 0
         for r in range(N):
             for c in range(N):
                 if grid[r][c] != 0:
-                    test_i, test_j = r + 1, c + 1
-                    test_v = grid[r][c]
-                    break 
-            if test_v != 0: 
-                break 
+                    test_i, test_j, test_v = r + 1, c + 1, grid[r][c]
+                    break
+            if test_v != 0: break
         
+        res_bc = False
         if test_v != 0:
-            print(f"Đang truy vấn (SLD Resolution) xem Val({test_i}, {test_j}) có phải là {test_v} không...")
-            is_proven = query_cell_backward_chaining(KB, test_i, test_j, test_v, N)
-            
-            if is_proven:
-                print(f"-> SUY DIỄN THÀNH CÔNG: Val({test_i}, {test_j}, {test_v}) là ĐÚNG dựa trên KB.")
-            else:
-                print(f"-> THẤT BẠI: Không thể chứng minh bằng Backward Chaining.")
-        else:
-            print("Ma trận này trống hoàn toàn, không có số mồi nào để test truy vấn!")
+            res_bc = query_cell_backward_chaining(KB, test_i, test_j, test_v, N)
+        t_bc = time.time() - t_start
 
-        # -------------------------------------------------------------
-        # THUẬT TOÁN 4: A* SEARCH VỚI HEURISTIC
-        # -------------------------------------------------------------
-        print("\n" + "="*60)
-        print("4. KẾT QUẢ GIẢI BẰNG A* SEARCH VỚI HEURISTIC")
-        print("="*60)
+        # 4. A* Search
+        grid_astar = copy.deepcopy(grid)
+        t_start = time.time()
+        res_astar, _, nodes_expanded = solve_astar(grid_astar, N, horiz, vert)
+        t_astar = time.time() - t_start
         
-        grid_to_solve_astar = copy.deepcopy(grid)
-        start_time_astar = time.time()
-        is_solved_astar, final_grid_astar, nodes_expanded = solve_astar(grid_to_solve_astar, N, horiz, vert)
-        end_time_astar = time.time()
-        
-        if is_solved_astar:
-            print(f"Đã tìm thấy giải pháp! (Thời gian chạy: {end_time_astar - start_time_astar:.5f} giây)")
-            print(f"Số trạng thái (nodes) đã mở rộng: {nodes_expanded}\n")
-            print_solution(final_grid_astar, N, horiz, vert) # Chỉ in full ma trận cho phần này
-        else:
-            print("Không tìm thấy giải pháp nào cho cấu hình này!")
+        # Lưu kết quả
+        results.append({
+            "File": filename,
+            "Size": f"{N}x{N}",
+            "Gen KB": t_kb,
+            "BT Time": t_bt,
+            "FC Time": t_fc,
+            "BC Time": t_bc,
+            "A* Time": t_astar,
+            "A* Nodes": nodes_expanded
+        })
+        print(f"--> Hoàn tất {filename}\n")
 
-    except FileNotFoundError:
-        print(f"Lỗi: Không tìm thấy file tại đường dẫn {input_file}. Hãy kiểm tra lại cấu trúc thư mục!")
+    # =========================================================================
+    # IN BẢNG TỔNG KẾT
+    # =========================================================================
+    print("="*105)
+    print(f"{'BẢNG TỔNG KẾT THỜI GIAN CHẠY CÁC THUẬT TOÁN (giây)':^105}")
+    print("="*105)
+    header = f"{'File':<15} | {'Size':<6} | {'Gen KB':<10} | {'Backtracking':<15} | {'Forward Chaining':<18} | {'Backward Chaining':<18} | {'A* Search':<12}"
+    print(header)
+    print("-" * 105)
+    
+    for r in results:
+        row_str = (
+            f"{r['File']:<15} | "
+            f"{r['Size']:<6} | "
+            f"{r['Gen KB']:<10.4f} | "
+            f"{r['BT Time']:<15.5f} | "
+            f"{r['FC Time']:<18.5f} | "
+            f"{r['BC Time']:<18.5f} | "
+            f"{r['A* Time']:<12.5f}"
+        )
+        print(row_str)
+    print("="*105)
+    print("* Lưu ý: Thời gian Backward Chaining trong bảng này là thời gian truy vấn 1 ô mồi đầu tiên tìm thấy.")
