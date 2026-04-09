@@ -546,12 +546,15 @@ class SolverTab(tk.Frame):
         found = []
         for pat in patterns:
             found.extend(sorted(glob.glob(pat)))
-        # Dedup
+            
         seen = set()
         unique = []
         for f in found:
-            if f not in seen:
-                seen.add(f); unique.append(f)
+            norm_path = os.path.normcase(os.path.abspath(f))
+            if norm_path not in seen:
+                seen.add(norm_path)
+                unique.append(f)
+                
         if unique:
             self._populate_file_list(unique)
             self._select_file(unique[0])
@@ -1190,8 +1193,21 @@ class FutoshikiApp(tk.Tk):
         self.geometry("1180x820")
         self.minsize(900, 650)
         self.configure(bg=THEME["bg"])
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
         self._apply_ttk_style()
         self._build_ui()
+
+    def _on_closing(self):
+        try:
+            # Ép cờ dừng (stop_flag) thành True để ngắt ngay lập tức các thuật toán đang chạy
+            if hasattr(self, 'solver_tab'):
+                self.solver_tab.stop_flag[0] = True
+                self.solver_tab.running = False
+        except Exception:
+            pass
+        
+        self.destroy()   # Đóng giao diện an toàn
+        os._exit(0)  # Force exit để đảm bảo tất cả threads con bị dừng
 
     def _apply_ttk_style(self):
         style = ttk.Style(self)
