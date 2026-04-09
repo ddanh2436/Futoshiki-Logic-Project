@@ -231,32 +231,78 @@ def reconstruct_grid_from_dpll(asn, N):
     return grid
 
 # ── Backward Chaining ────────────────────────────────────────────────────────
-def build_horn_kb(clauses):
-    horn = {}
-    for c in clauses:
-        pos = [l for l in c if l > 0]
-        neg = [-l for l in c if l < 0]
-        if len(pos) == 1:
-            h = pos[0]
-            horn.setdefault(h, []).append(neg)
-    return horn
+def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
+    """
+    Trình thông dịch Prolog-like (SLD Resolution) cho Backward Chaining.
+    Mục tiêu (Goal): ?- Val(query_i, query_j, query_v)
+    """
+    stats = [0]  # Đếm số bước suy diễn lùi (inferences)
 
-def run_backward_chaining(KB, i, j, v, N):
-    horn = build_horn_kb(KB)
-    target = get_var_id(i, j, v, N)
-    stats = [0]
-    def bc(query, visited):
+    def ask(goal):
         stats[0] += 1
-        if not query: return True
-        q = query[0]; rest = query[1:]
-        if q in visited: return False
-        visited.add(q)
-        if q in horn:
-            for body in horn[q]:
-                if bc(body + rest, visited.copy()): return True
-        visited.remove(q)
+        pred = goal[0]
+        args = goal[1:]
+
+        # Goal 1: Chứng minh giá trị Val(r,c,v)
+        if pred == "Val":
+            r, c, v = args
+            # Luật 1: val(r,c,v) :- given(r,c,v).
+            if ask(("Given", r, c, v)):
+                return True
+            # Luật 2: val(r,c,v) :- empty(r,c), check_row(r,v), check_col(c,v), check_rel(r,c,v).
+            if ask(("Empty", r, c)):
+                if ask(("CheckRow", r, c, v)) and ask(("CheckCol", r, c, v)) and ask(("CheckRel", r, c, v)):
+                    return True
+            return False
+
+        # Goal 2: Sự thật (Fact) - Ô đã có sẵn mồi
+        elif pred == "Given":
+            r, c, v = args
+            return grid[r][c] == v
+
+        # Goal 3: Sự thật - Ô trống
+        elif pred == "Empty":
+            r, c = args
+            return grid[r][c] == 0
+
+        # Goal 4: Kiểm tra hàng
+        elif pred == "CheckRow":
+            r, c, v = args
+            for j in range(N):
+                if j != c and grid[r][j] == v:
+                    return False
+            return True
+
+        # Goal 5: Kiểm tra cột
+        elif pred == "CheckCol":
+            r, c, v = args
+            for i in range(N):
+                if i != r and grid[i][c] == v:
+                    return False
+            return True
+
+        # Goal 6: Kiểm tra ràng buộc dấu (<, >, ^, v)
+        elif pred == "CheckRel":
+            r, c, v = args
+            # Ràng buộc ngang
+            if c > 0 and grid[r][c-1] != 0:
+                if horiz[r][c-1] == 1 and not (grid[r][c-1] < v): return False
+                if horiz[r][c-1] == -1 and not (grid[r][c-1] > v): return False
+            if c < N-1 and grid[r][c+1] != 0:
+                if horiz[r][c] == 1 and not (v < grid[r][c+1]): return False
+                if horiz[r][c] == -1 and not (v > grid[r][c+1]): return False
+            # Ràng buộc dọc
+            if r > 0 and grid[r-1][c] != 0:
+                if vert[r-1][c] == 1 and not (grid[r-1][c] < v): return False
+                if vert[r-1][c] == -1 and not (grid[r-1][c] > v): return False
+            if r < N-1 and grid[r+1][c] != 0:
+                if vert[r][c] == 1 and not (v < grid[r+1][c]): return False
+                if vert[r][c] == -1 and not (v > grid[r+1][c]): return False
+            return True
+
         return False
-    res = bc([target], set())
+
+    res = ask(("Val", query_i, query_j, query_v))
     return res, stats[0]
 
 # ── A* Search ────────────────────────────────────────────────────────────────
@@ -889,22 +935,31 @@ class SolverTab(tk.Frame):
                     self.after(0, lambda g=final_grid: self.board.show_final(g))
 
             elif algo == "BC":
-                ti, tj, tv = -1, -1, 0
+                # Tìm 1 ô trống đầu tiên để Query
+                ti, tj = -1, -1
                 for row in range(N):
                     for col in range(N):
-                        if grid_o[row][col] != 0:
-                            ti, tj, tv = row+1, col+1, grid_o[row][col]; break
-                    if tv: break
-                KB = build_full_kb(N, grid_o, horiz, vert)
-                self.after(0, lambda i=ti,j=tj,v=tv:
-                           self.log.log(f"  Query x[{i},{j}]={v}", "info"))
-                res, nodes = run_backward_chaining(KB, ti, tj, tv, N)
-                msg = (f"  ✓ Proved x[{ti},{tj}]={tv}" if res
-                       else f"  ✗ Cannot prove x[{ti},{tj}]={tv}")
-                tag = "done" if res else "backtrack"
+                        if grid_o[row][col] == 0:
+                            ti, tj = row, col; break
+                    if ti != -1: break
+                
+                self.after(0, lambda: self.log.log(f"  Prolog Query: ?- Val({ti+1},{tj+1}, V)", "info"))
+                
+                total_nodes = 0
+                valid_vals = []
+                for v in range(1, N + 1):
+                    res, nds = run_backward_chaining(grid_o, N, horiz, vert, ti, tj, v)
+                    total_nodes += nds
+                    if res: valid_vals.append(v)
+                
+                msg = f"  ✓ SLD Resolution tìm được miền giá trị hợp lệ: {valid_vals}" if valid_vals else "  ✗ Không có giá trị hợp lệ nào"
+                tag = "done" if valid_vals else "backtrack"
                 self.after(0, lambda m=msg, t=tag: self.log.log(m, t))
+                
+                # Để hiển thị nghiệm cuối cùng lên UI, ta mượn A* giải nhanh phần còn lại
                 g2 = copy.deepcopy(grid_o)
                 _, final_grid, _ = run_astar_steps(g2, N, horiz, vert)
+                nodes = total_nodes # Trả về số node suy diễn của BC để hiển thị Stats
 
             elif algo == "A*":
                 res, final_grid, nodes = run_astar_steps(
