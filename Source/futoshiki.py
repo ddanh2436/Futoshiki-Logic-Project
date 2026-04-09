@@ -298,39 +298,78 @@ def run_dpll(clauses):
 # THUẬT TOÁN 3: BACKWARD CHAINING (PROLOG STYLE)
 # =============================================================================
 
-def build_horn_kb(clauses):
-    horn_kb = {}
-    for clause in clauses:
-        pos_lits = [l for l in clause if l > 0]
-        neg_lits = [-l for l in clause if l < 0]
-        if len(pos_lits) == 1:
-            head = pos_lits[0]
-            if head not in horn_kb:
-                horn_kb[head] = []
-            horn_kb[head].append(neg_lits)
-    return horn_kb
+def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
+    """
+    Trình thông dịch Prolog-like (SLD Resolution) cho Backward Chaining.
+    Mục tiêu (Goal): ?- Val(query_i, query_j, query_v)
+    """
+    stats = [0]  # Đếm số bước suy diễn lùi (inferences)
 
-def run_backward_chaining(KB, i, j, v, N):
-    horn_kb = build_horn_kb(KB)
-    target_var = get_var_id(i, j, v, N)
-    stats = [0] # Đếm số phép suy diễn lùi
-    
-    def fol_bc_ask(query_list, visited):
+    def ask(goal):
         stats[0] += 1
-        if not query_list: return True
-        q = query_list[0]
-        rest_query = query_list[1:]
-        if q in visited: return False
-        visited.add(q)
-        if q in horn_kb:
-            for body in horn_kb[q]:
-                new_query_list = body + rest_query
-                if fol_bc_ask(new_query_list, visited.copy()):
+        pred = goal[0]
+        args = goal[1:]
+
+        # Goal 1: Chứng minh giá trị Val(r,c,v)
+        if pred == "Val":
+            r, c, v = args
+            # Luật 1: val(r,c,v) :- given(r,c,v).
+            if ask(("Given", r, c, v)):
+                return True
+            # Luật 2: val(r,c,v) :- empty(r,c), check_row(r,v), check_col(c,v), check_rel(r,c,v).
+            if ask(("Empty", r, c)):
+                if ask(("CheckRow", r, c, v)) and ask(("CheckCol", r, c, v)) and ask(("CheckRel", r, c, v)):
                     return True
-        visited.remove(q)
+            return False
+
+        # Goal 2: Sự thật (Fact) - Ô đã có sẵn mồi
+        elif pred == "Given":
+            r, c, v = args
+            return grid[r][c] == v
+
+        # Goal 3: Sự thật - Ô trống
+        elif pred == "Empty":
+            r, c = args
+            return grid[r][c] == 0
+
+        # Goal 4: Kiểm tra hàng
+        elif pred == "CheckRow":
+            r, c, v = args
+            for j in range(N):
+                if j != c and grid[r][j] == v:
+                    return False
+            return True
+
+        # Goal 5: Kiểm tra cột
+        elif pred == "CheckCol":
+            r, c, v = args
+            for i in range(N):
+                if i != r and grid[i][c] == v:
+                    return False
+            return True
+
+        # Goal 6: Kiểm tra ràng buộc dấu (<, >, ^, v)
+        elif pred == "CheckRel":
+            r, c, v = args
+            # Ràng buộc ngang
+            if c > 0 and grid[r][c-1] != 0:
+                if horiz[r][c-1] == 1 and not (grid[r][c-1] < v): return False
+                if horiz[r][c-1] == -1 and not (grid[r][c-1] > v): return False
+            if c < N-1 and grid[r][c+1] != 0:
+                if horiz[r][c] == 1 and not (v < grid[r][c+1]): return False
+                if horiz[r][c] == -1 and not (v > grid[r][c+1]): return False
+            # Ràng buộc dọc
+            if r > 0 and grid[r-1][c] != 0:
+                if vert[r-1][c] == 1 and not (grid[r-1][c] < v): return False
+                if vert[r-1][c] == -1 and not (grid[r-1][c] > v): return False
+            if r < N-1 and grid[r+1][c] != 0:
+                if vert[r][c] == 1 and not (v < grid[r+1][c]): return False
+                if vert[r][c] == -1 and not (v > grid[r+1][c]): return False
+            return True
+
         return False
-        
-    res = fol_bc_ask([target_var], set())
+
+    res = ask(("Val", query_i, query_j, query_v))
     return res, stats[0]
 
 
@@ -426,17 +465,37 @@ if __name__ == "__main__":
         (res_fc, _, nodes_fc), t_fc, ram_fc = run_benchmark(run_dpll, KB)
 
         # 3. Backward Chaining (Test 1 ô mồi)
-        test_i, test_j, test_v = -1, -1, 0
+       # 3. Backward Chaining (SLD Resolution Query trên 1 ô trống)
+        test_i, test_j = -1, -1
         for r in range(N):
             for c in range(N):
-                if grid[r][c] != 0:
-                    test_i, test_j, test_v = r + 1, c + 1, grid[r][c]
+                if grid[r][c] == 0:
+                    test_i, test_j = r, c
                     break
-            if test_v != 0: break
+            if test_i != -1: break
         
-        if test_v != 0:
-            (res_bc, nodes_bc), t_bc, ram_bc = run_benchmark(run_backward_chaining, KB, test_i, test_j, test_v, N)
+        t_bc, ram_bc, nodes_bc = 0, 0, 0
+        valid_candidates = []
+        
+        if test_i != -1:
+            tracemalloc.start()
+            start_time = time.perf_counter()
+            
+            # Query tất cả các giá trị v có thể cho ô trống này
+            for v in range(1, N + 1):
+                res, stats = run_backward_chaining(grid, N, horiz, vert, test_i, test_j, v)
+                nodes_bc += stats
+                if res:
+                    valid_candidates.append(v)
+                    
+            end_time = time.perf_counter()
+            t_bc = end_time - start_time
+            _, peak_ram = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            ram_bc = peak_ram / (1024 * 1024)
+            print(f"--> BC Query ?- Val({test_i+1}, {test_j+1}, V): Giá trị hợp lệ V = {valid_candidates}")
         else:
+            # Nếu bảng không có ô trống
             t_bc, ram_bc, nodes_bc = 0, 0, 0
 
         # 4. A* Search
@@ -495,4 +554,4 @@ if __name__ == "__main__":
         
     print("="*160)
     print("* T(s): Thời gian chạy (giây) | R(MB): Đỉnh RAM tiêu thụ (Megabyte) | Nodes: Số node đã duyệt hoặc phép suy diễn logic.")
-    print("* Backward Chaining (BC) chỉ đo lường thời gian truy vấn để kiểm tra 1 ô mồi đầu tiên được tìm thấy.")
+    print("* Backward Chaining (BC) chỉ đo lường thời gian truy vấn để tìm miền giá trị hợp lệ của 1 ô trống đầu tiên.")
