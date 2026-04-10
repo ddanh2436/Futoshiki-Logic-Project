@@ -396,41 +396,81 @@ def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
     return res, stats[0]
 
 
-def get_heuristic_and_mrv(grid, N, horiz, vert):
+def get_advanced_heuristic_mrv(grid, N, horiz, vert):
+    domains = {}
     empty_count = 0
-    min_options = N + 1
-    best_pos = None
 
+    # BƯỚC 1: Khởi tạo miền giá trị (Domain) bằng Forward Checking
     for r in range(N):
         for c in range(N):
             if grid[r][c] == 0:
                 empty_count += 1
-                # Đếm số giá trị hợp lệ (Forward Checking)
-                options = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
+                valid_vals = []
+                for v in range(1, N + 1):
+                    if is_safe(grid, r, c, v, N, horiz, vert):
+                        valid_vals.append(v)
                 
-                if options == 0:
-                    return float('inf'), None  # Nhánh vô nghiệm, cắt tỉa ngay
-                
-                if options < min_options:
-                    min_options = options
-                    best_pos = (r, c)
-                    
+                if not valid_vals:
+                    return float('inf'), None  # Vô nghiệm sớm
+                domains[(r, c)] = valid_vals
+
+    # BƯỚC 2: Rút gọn miền giá trị (Naked Singles)
+    changed = True
+    while changed:
+        changed = False
+        for (r, c), valid_vals in list(domains.items()):
+            if len(valid_vals) == 1:
+                fixed_val = valid_vals[0]
+                for (r2, c2) in domains:
+                    if (r2, c2) != (r, c) and (r2 == r or c2 == c):
+                        if fixed_val in domains[(r2, c2)]:
+                            domains[(r2, c2)].remove(fixed_val)
+                            changed = True
+                            if not domains[(r2, c2)]:
+                                return float('inf'), None
+
+    # BƯỚC 3: CẢI TIẾN TIE-BREAKER CHO FUTOSHIKI (Inequality Degree)
+    min_options = float('inf')
+    best_pos = None
+    max_ineq_degree = -1
+
+    for pos, valid_vals in domains.items():
+        options = len(valid_vals)
+        r, c = pos
+        
+        # Đếm số lượng ràng buộc DẤU (<, >) chạm vào ô này
+        ineq_count = 0
+        if c > 0 and horiz[r][c-1] != 0: ineq_count += 1
+        if c < N-1 and horiz[r][c] != 0: ineq_count += 1
+        if r > 0 and vert[r-1][c] != 0: ineq_count += 1
+        if r < N-1 and vert[r][c] != 0: ineq_count += 1
+
+        if options < min_options:
+            min_options = options
+            best_pos = pos
+            max_ineq_degree = ineq_count
+        elif options == min_options:
+            # Khi MRV hòa, BẮT BUỘC ưu tiên ô bị kẹp bởi nhiều dấu <, > hơn
+            if ineq_count > max_ineq_degree:
+                best_pos = pos
+                max_ineq_degree = ineq_count
+
     return empty_count, best_pos
 
 def run_astar(initial_grid, N, horiz, vert):
     initial_g = sum(1 for r in range(N) for c in range(N) if initial_grid[r][c] != 0)
-    initial_h, initial_mrv = get_heuristic_and_mrv(initial_grid, N, horiz, vert)
+    
+    # GỌI HÀM NÂNG CẤP TẠI ĐÂY
+    initial_h, initial_mrv = get_advanced_heuristic_mrv(initial_grid, N, horiz, vert)
     
     if initial_h == float('inf'): return False, None, 0
         
     pq = []
     tie_breaker = itertools.count() 
-    # MẸO: Lưu sẵn initial_mrv vào tuple để khỏi phải tính lại
     heapq.heappush(pq, (initial_g + initial_h, -initial_g, next(tie_breaker), initial_grid, initial_mrv))
     nodes_expanded = 0 
     
     while pq:
-        # Lấy trực tiếp empty_pos từ queue
         f, neg_g, _, current_grid, empty_pos = heapq.heappop(pq)
         g = -neg_g
         nodes_expanded += 1
@@ -444,8 +484,8 @@ def run_astar(initial_grid, N, horiz, vert):
                 child_grid[row][col] = num
                 child_g = g + 1
                 
-                # Tính trước thông số cho node con
-                child_h, child_mrv = get_heuristic_and_mrv(child_grid, N, horiz, vert)
+                # GỌI HÀM NÂNG CẤP CHO CÁC NODE CON
+                child_h, child_mrv = get_advanced_heuristic_mrv(child_grid, N, horiz, vert)
                 
                 if child_h != float('inf'):
                     heapq.heappush(pq, (child_g + child_h, -child_g, next(tie_breaker), child_grid, child_mrv))

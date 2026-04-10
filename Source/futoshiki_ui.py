@@ -232,40 +232,30 @@ def reconstruct_grid_from_dpll(asn, N):
 
 # ── Backward Chaining ────────────────────────────────────────────────────────
 def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
-    """
-    Trình thông dịch Prolog-like (SLD Resolution) cho Backward Chaining.
-    Mục tiêu (Goal): ?- Val(query_i, query_j, query_v)
-    """
-    stats = [0]  # Đếm số bước suy diễn lùi (inferences)
+    stats = [0] 
 
     def ask(goal):
         stats[0] += 1
         pred = goal[0]
         args = goal[1:]
 
-        # Goal 1: Chứng minh giá trị Val(r,c,v)
         if pred == "Val":
             r, c, v = args
-            # Luật 1: val(r,c,v) :- given(r,c,v).
             if ask(("Given", r, c, v)):
                 return True
-            # Luật 2: val(r,c,v) :- empty(r,c), check_row(r,v), check_col(c,v), check_rel(r,c,v).
             if ask(("Empty", r, c)):
                 if ask(("CheckRow", r, c, v)) and ask(("CheckCol", r, c, v)) and ask(("CheckRel", r, c, v)):
                     return True
             return False
 
-        # Goal 2: Sự thật (Fact) - Ô đã có sẵn mồi
         elif pred == "Given":
             r, c, v = args
             return grid[r][c] == v
 
-        # Goal 3: Sự thật - Ô trống
         elif pred == "Empty":
             r, c = args
             return grid[r][c] == 0
 
-        # Goal 4: Kiểm tra hàng
         elif pred == "CheckRow":
             r, c, v = args
             for j in range(N):
@@ -273,7 +263,6 @@ def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
                     return False
             return True
 
-        # Goal 5: Kiểm tra cột
         elif pred == "CheckCol":
             r, c, v = args
             for i in range(N):
@@ -281,17 +270,14 @@ def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
                     return False
             return True
 
-        # Goal 6: Kiểm tra ràng buộc dấu (<, >, ^, v)
         elif pred == "CheckRel":
             r, c, v = args
-            # Ràng buộc ngang
             if c > 0 and grid[r][c-1] != 0:
                 if horiz[r][c-1] == 1 and not (grid[r][c-1] < v): return False
                 if horiz[r][c-1] == -1 and not (grid[r][c-1] > v): return False
             if c < N-1 and grid[r][c+1] != 0:
                 if horiz[r][c] == 1 and not (v < grid[r][c+1]): return False
                 if horiz[r][c] == -1 and not (v > grid[r][c+1]): return False
-            # Ràng buộc dọc
             if r > 0 and grid[r-1][c] != 0:
                 if vert[r-1][c] == 1 and not (grid[r-1][c] < v): return False
                 if vert[r-1][c] == -1 and not (grid[r-1][c] > v): return False
@@ -305,21 +291,71 @@ def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
     res = ask(("Val", query_i, query_j, query_v))
     return res, stats[0]
 
-# ── A* Search ────────────────────────────────────────────────────────────────
-def get_mrv(grid, N, horiz, vert):
-    empty = 0; min_opts = N+1; best = None
+# ── A* Search (NÂNG CẤP) ─────────────────────────────────────────────────────
+def get_advanced_heuristic_mrv(grid, N, horiz, vert):
+    domains = {}
+    empty_count = 0
+
+    # BƯỚC 1: Khởi tạo miền giá trị (Domain) bằng Forward Checking
     for r in range(N):
         for c in range(N):
             if grid[r][c] == 0:
-                empty += 1
-                opts = sum(1 for v in range(1,N+1) if is_safe(grid,r,c,v,N,horiz,vert))
-                if opts == 0: return float('inf'), None
-                if opts < min_opts: min_opts = opts; best = (r,c)
-    return empty, best
+                empty_count += 1
+                valid_vals = []
+                for v in range(1, N + 1):
+                    if is_safe(grid, r, c, v, N, horiz, vert):
+                        valid_vals.append(v)
+                
+                if not valid_vals:
+                    return float('inf'), None  # Vô nghiệm sớm
+                domains[(r, c)] = valid_vals
+
+    # BƯỚC 2: Rút gọn miền giá trị (Naked Singles)
+    changed = True
+    while changed:
+        changed = False
+        for (r, c), valid_vals in list(domains.items()):
+            if len(valid_vals) == 1:
+                fixed_val = valid_vals[0]
+                for (r2, c2) in domains:
+                    if (r2, c2) != (r, c) and (r2 == r or c2 == c):
+                        if fixed_val in domains[(r2, c2)]:
+                            domains[(r2, c2)].remove(fixed_val)
+                            changed = True
+                            if not domains[(r2, c2)]:
+                                return float('inf'), None
+
+    # BƯỚC 3: CẢI TIẾN TIE-BREAKER CHO FUTOSHIKI (Inequality Degree)
+    min_options = float('inf')
+    best_pos = None
+    max_ineq_degree = -1
+
+    for pos, valid_vals in domains.items():
+        options = len(valid_vals)
+        r, c = pos
+        
+        # Đếm số lượng ràng buộc DẤU (<, >) chạm vào ô này
+        ineq_count = 0
+        if c > 0 and horiz[r][c-1] != 0: ineq_count += 1
+        if c < N-1 and horiz[r][c] != 0: ineq_count += 1
+        if r > 0 and vert[r-1][c] != 0: ineq_count += 1
+        if r < N-1 and vert[r][c] != 0: ineq_count += 1
+
+        if options < min_options:
+            min_options = options
+            best_pos = pos
+            max_ineq_degree = ineq_count
+        elif options == min_options:
+            # Khi MRV hòa, BẮT BUỘC ưu tiên ô bị kẹp bởi nhiều dấu <, > hơn
+            if ineq_count > max_ineq_degree:
+                best_pos = pos
+                max_ineq_degree = ineq_count
+
+    return empty_count, best_pos
 
 def run_astar_steps(initial_grid, N, horiz, vert, step_cb=None, stop_flag=None):
     g0 = sum(1 for r in range(N) for c in range(N) if initial_grid[r][c] != 0)
-    h0, mrv0 = get_mrv(initial_grid, N, horiz, vert)
+    h0, mrv0 = get_advanced_heuristic_mrv(initial_grid, N, horiz, vert)
     if h0 == float('inf'): return False, None, 0
     pq = []
     tb = itertools.count()
@@ -338,7 +374,7 @@ def run_astar_steps(initial_grid, N, horiz, vert, step_cb=None, stop_flag=None):
                 child = [row[:] for row in cur_grid]
                 child[r][c] = num
                 if step_cb: step_cb("place", r, c, num, nodes, child)
-                ch, cmrv = get_mrv(child, N, horiz, vert)
+                ch, cmrv = get_advanced_heuristic_mrv(child, N, horiz, vert)
                 if ch != float('inf'):
                     heapq.heappush(pq, (g+1+ch, -(g+1), next(tb), child, cmrv))
     return False, None, nodes
@@ -1015,28 +1051,28 @@ class SolverTab(tk.Frame):
 # TAB 2: BENCHMARK & BIỂU ĐỒ SO SÁNH
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Số liệu thực từ lần chạy benchmark
+# Số liệu đã được cập nhật từ kết quả Benchmark với A* tối ưu mới nhất!
 BENCHMARK_DATA = [
     {"file":"input-01","N":4,"sol":True,
-     "BT":(0.0002,17,0.001),"FC":(0.0027,1,0.031),"BC":(0.0005,2,0.001),"A*":(0.0010,13,0.001)},
+     "BT":(0.0042,17,0.001),"FC":(0.0036,1,0.035),"BC":(0.0001,21,0.002),"A*":(0.0044,13,0.003)},
     {"file":"input-02","N":4,"sol":True,
-     "BT":(0.0006,59,0.001),"FC":(0.0103,24,0.125),"BC":(0.0000,0,0.000),"A*":(0.0055,36,0.003)},
+     "BT":(0.0009,59,0.001),"FC":(0.0131,24,0.144),"BC":(0.0001,24,0.002),"A*":(0.0079,30,0.006)},
     {"file":"input-03","N":5,"sol":True,
-     "BT":(0.0009,76,0.001),"FC":(0.0141,1,0.108),"BC":(0.0016,2,0.001),"A*":(0.0021,18,0.002)},
+     "BT":(0.0010,76,0.001),"FC":(0.0185,1,0.111),"BC":(0.0004,27,0.002),"A*":(0.0053,18,0.004)},
     {"file":"input-04","N":5,"sol":True,
-     "BT":(0.0019,152,0.002),"FC":(0.0465,24,0.405),"BC":(0.0000,0,0.000),"A*":(0.0076,26,0.005)},
+     "BT":(0.0020,152,0.001),"FC":(0.0291,24,0.446),"BC":(0.0001,30,0.002),"A*":(0.0111,26,0.008)},
     {"file":"input-05","N":6,"sol":True,
-     "BT":(0.5977,32842,0.002),"FC":(0.7783,531,1.050),"BC":(0.0028,2,0.001),"A*":(0.2606,846,0.008)},
+     "BT":(0.5810,32842,0.001),"FC":(0.7964,449,1.084),"BC":(0.0001,33,0.002),"A*":(0.0737,116,0.012)},
     {"file":"input-06","N":6,"sol":False,
-     "BT":(2.5451,154015,0.001),"FC":(0.0245,1,0.195),"BC":(0.0029,2,0.001),"A*":(0.0013,2,0.002)},
+     "BT":(3.8481,154015,0.001),"FC":(0.0404,1,0.202),"BC":(0.0002,34,0.003),"A*":(0.0022,1,0.004)},
     {"file":"input-07","N":7,"sol":True,
-     "BT":(0.0019,102,0.004),"FC":(0.3931,135,0.728),"BC":(0.0060,2,0.001),"A*":(0.1084,365,0.006)},
+     "BT":(0.0023,102,0.002),"FC":(0.7980,115,0.801),"BC":(0.0002,37,0.003),"A*":(0.1280,142,0.011)},
     {"file":"input-08","N":7,"sol":False,
-     "BT":(0.0117,782,0.001),"FC":(0.1497,1,0.371),"BC":(0.0064,2,0.002),"A*":(0.0004,0,0.001)},
+     "BT":(0.0300,782,0.001),"FC":(0.2708,1,0.382),"BC":(0.0003,37,0.003),"A*":(0.0009,0,0.003)},
     {"file":"input-09","N":9,"sol":True,
-     "BT":(6.7884,217488,0.005),"FC":(3.6978,289,2.725),"BC":(0.0225,2,0.002),"A*":(0.2177,338,0.030)},
+     "BT":(9.5812,217488,0.003),"FC":(2.1481,94,2.659),"BC":(0.0002,49,0.004),"A*":(0.1719,142,0.036)},
     {"file":"input-10","N":9,"sol":True,
-     "BT":(11.0720,383211,0.005),"FC":(2.5914,42,1.092),"BC":(0.0238,2,0.002),"A*":(0.1603,216,0.010)},
+     "BT":(11.1897,383211,0.002),"FC":(2.0922,20,1.112),"BC":(0.0002,48,0.004),"A*":(0.1314,91,0.012)},
 ]
 
 class BenchmarkTab(tk.Frame):
