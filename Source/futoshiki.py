@@ -145,6 +145,25 @@ def generate_A10_greater_v(N, vert):
                         clauses.append([-get_var_id(r+1, c+1, v1, N), -get_var_id(r+2, c+1, v2, N)])
     return clauses
 
+# --- 2 TIÊN ĐỀ MỚI: RÀNG BUỘC ĐẦY ĐỦ (COMPLETENESS) ---
+def generate_A11_row_completeness(N):
+    """Tiên đề 11: Mỗi giá trị v phải xuất hiện ở ít nhất 1 ô trên mỗi hàng i."""
+    clauses = []
+    for i in range(1, N + 1):
+        for v in range(1, N + 1):
+            clause = [get_var_id(i, j, v, N) for j in range(1, N + 1)]
+            clauses.append(clause)
+    return clauses
+
+def generate_A12_col_completeness(N):
+    """Tiên đề 12: Mỗi giá trị v phải xuất hiện ở ít nhất 1 ô trên mỗi cột j."""
+    clauses = []
+    for j in range(1, N + 1):
+        for v in range(1, N + 1):
+            clause = [get_var_id(i, j, v, N) for i in range(1, N + 1)]
+            clauses.append(clause)
+    return clauses
+
 def build_full_kb(N, grid, horiz, vert):
     KB = []
     KB.extend(generate_A1_at_least_one(N))
@@ -157,6 +176,11 @@ def build_full_kb(N, grid, horiz, vert):
     KB.extend(generate_A8_horizontal_greater(N, horiz))
     KB.extend(generate_A9_vertical_less(N, vert))
     KB.extend(generate_A10_greater_v(N, vert))
+    
+    # Kích hoạt 2 tiên đề mới
+    KB.extend(generate_A11_row_completeness(N))
+    KB.extend(generate_A12_col_completeness(N))
+    
     return KB
 
 # =============================================================================
@@ -282,7 +306,6 @@ def run_dpll(clauses):
         shortest_clause = min(simplified_clauses, key=len)
         chosen_var = abs(shortest_clause[0])
 
-        # Sửa lỗi: Gán biến tạm thay vì gọi đệ quy 2 lần giống code cũ
         res1, asn1 = dpll_recursive(simplified_clauses + [[chosen_var]], new_assignment)
         if res1: return True, asn1
         
@@ -429,8 +452,6 @@ def run_astar(initial_grid, N, horiz, vert):
                     
     return False, None, nodes_expanded
 
-
-
 if __name__ == "__main__":
     script_dir = os.path.dirname(os.path.abspath(__file__))
     input_folder = os.path.join(script_dir, "Inputs")
@@ -464,8 +485,7 @@ if __name__ == "__main__":
         # 2. Forward Chaining (DPLL)
         (res_fc, _, nodes_fc), t_fc, ram_fc = run_benchmark(run_dpll, KB)
 
-        # 3. Backward Chaining (Test 1 ô mồi)
-       # 3. Backward Chaining (SLD Resolution Query trên 1 ô trống)
+        # 3. Backward Chaining (SLD Resolution Query trên 1 ô trống)
         test_i, test_j = -1, -1
         for r in range(N):
             for c in range(N):
@@ -524,7 +544,6 @@ if __name__ == "__main__":
     # =========================================================================
     # IN BẢNG TỔNG KẾT SIÊU RỘNG (TIME / RAM / NODES)
     # =========================================================================
-    # T(s) = Time in seconds | R(MB) = Peak RAM in MB | Nodes = Nodes expanded / Inferences made
     
     print("\n" + "="*160)
     print(f"{'BẢNG TỔNG KẾT HIỆU NĂNG THUẬT TOÁN (THỜI GIAN / RAM / NODES)':^160}")
@@ -539,7 +558,6 @@ if __name__ == "__main__":
     print("-" * 160)
     
     for r in results:
-        # Unpack dữ liệu
         bt_t, bt_r, bt_n = r["BT"]
         fc_t, fc_r, fc_n = r["FC"]
         bc_t, bc_r, bc_n = r["BC"]
