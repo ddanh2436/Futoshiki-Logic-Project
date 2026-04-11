@@ -359,24 +359,36 @@ def run_astar_steps(initial_grid, N, horiz, vert, step_cb=None, stop_flag=None):
     if h0 == float('inf'): return False, None, 0
     pq = []
     tb = itertools.count()
-    heapq.heappush(pq, (g0+h0, -g0, next(tb), initial_grid, mrv0))
+    
+    # Thêm một tuple rỗng () ở cuối để lưu "hành động cuối cùng (last_move)"
+    heapq.heappush(pq, (g0+h0, -g0, next(tb), initial_grid, mrv0, ()))
     nodes = 0
+    
     while pq:
         if stop_flag and stop_flag[0]: return False, None, nodes
-        f, neg_g, _, cur_grid, pos = heapq.heappop(pq)
+        
+        # Bổ sung last_move khi lấy ra khỏi Queue
+        f, neg_g, _, cur_grid, pos, last_move = heapq.heappop(pq)
         g = -neg_g; nodes += 1
+        
+        # UPDATE UI TẠI ĐÂY (Khi node thực sự được duyệt)
+        if step_cb and last_move:
+            step_cb("place", last_move[0], last_move[1], last_move[2], nodes, cur_grid)
+            
         if not pos:
             if step_cb: step_cb("done", -1, -1, -1, nodes, cur_grid)
             return True, cur_grid, nodes
+            
         r, c = pos
         for num in range(1, N+1):
             if is_safe(cur_grid, r, c, num, N, horiz, vert):
                 child = [row[:] for row in cur_grid]
                 child[r][c] = num
-                if step_cb: step_cb("place", r, c, num, nodes, child)
                 ch, cmrv = get_advanced_heuristic_mrv(child, N, horiz, vert)
                 if ch != float('inf'):
-                    heapq.heappush(pq, (g+1+ch, -(g+1), next(tb), child, cmrv))
+                    # Lưu kèm hành động (r, c, num) vừa thực hiện để truyền xuống node con
+                    heapq.heappush(pq, (g+1+ch, -(g+1), next(tb), child, cmrv, (r, c, num)))
+                    
     return False, None, nodes
 
 # ── Benchmark wrapper ─────────────────────────────────────────────────────────
@@ -1052,27 +1064,28 @@ class SolverTab(tk.Frame):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Số liệu đã được cập nhật từ kết quả Benchmark với A* tối ưu mới nhất!
+# Cập nhật vào futoshiki_ui.py (Phần Tab 2)
 BENCHMARK_DATA = [
     {"file":"input-01","N":4,"sol":True,
-     "BT":(0.0042,17,0.001),"FC":(0.0036,1,0.035),"BC":(0.0001,21,0.002),"A*":(0.0044,13,0.003)},
+     "BT":(0.0019,17,0.001),"FC":(0.0035,1,0.035),"BC":(0.0001,21,0.002),"A*":(0.0016,13,0.001)},
     {"file":"input-02","N":4,"sol":True,
-     "BT":(0.0009,59,0.001),"FC":(0.0131,24,0.144),"BC":(0.0001,24,0.002),"A*":(0.0079,30,0.006)},
+     "BT":(0.0011,59,0.001),"FC":(0.0176,24,0.144),"BC":(0.0001,24,0.002),"A*":(0.0037,17,0.003)},
     {"file":"input-03","N":5,"sol":True,
-     "BT":(0.0010,76,0.001),"FC":(0.0185,1,0.111),"BC":(0.0004,27,0.002),"A*":(0.0053,18,0.004)},
+     "BT":(0.0009,76,0.001),"FC":(0.0169,1,0.111),"BC":(0.0001,27,0.002),"A*":(0.0034,18,0.002)},
     {"file":"input-04","N":5,"sol":True,
-     "BT":(0.0020,152,0.001),"FC":(0.0291,24,0.446),"BC":(0.0001,30,0.002),"A*":(0.0111,26,0.008)},
+     "BT":(0.0025,152,0.002),"FC":(0.0365,24,0.446),"BC":(0.0001,30,0.002),"A*":(0.0885,411,0.005)},
     {"file":"input-05","N":6,"sol":True,
-     "BT":(0.5810,32842,0.001),"FC":(0.7964,449,1.084),"BC":(0.0001,33,0.002),"A*":(0.0737,116,0.012)},
+     "BT":(0.6189,32842,0.002),"FC":(0.8645,449,1.084),"BC":(0.0001,33,0.002),"A*":(0.0463,102,0.005)},
     {"file":"input-06","N":6,"sol":False,
-     "BT":(3.8481,154015,0.001),"FC":(0.0404,1,0.202),"BC":(0.0002,34,0.003),"A*":(0.0022,1,0.004)},
+     "BT":(2.6390,154015,0.001),"FC":(0.0278,1,0.202),"BC":(0.0001,34,0.003),"A*":(0.0016,2,0.002)},
     {"file":"input-07","N":7,"sol":True,
-     "BT":(0.0023,102,0.002),"FC":(0.7980,115,0.801),"BC":(0.0002,37,0.003),"A*":(0.1280,142,0.011)},
+     "BT":(0.0028,102,0.002),"FC":(0.4244,115,0.801),"BC":(0.0001,37,0.003),"A*":(0.0416,107,0.004)},
     {"file":"input-08","N":7,"sol":False,
-     "BT":(0.0300,782,0.001),"FC":(0.2708,1,0.382),"BC":(0.0003,37,0.003),"A*":(0.0009,0,0.003)},
+     "BT":(0.0132,782,0.001),"FC":(0.1570,1,0.382),"BC":(0.0001,37,0.003),"A*":(0.0009,0,0.001)},
     {"file":"input-09","N":9,"sol":True,
-     "BT":(9.5812,217488,0.003),"FC":(2.1481,94,2.659),"BC":(0.0002,49,0.004),"A*":(0.1719,142,0.036)},
+     "BT":(6.8041,217488,0.004),"FC":(2.1809,94,2.659),"BC":(0.0002,49,0.004),"A*":(0.1969,216,0.030)},
     {"file":"input-10","N":9,"sol":True,
-     "BT":(11.1897,383211,0.002),"FC":(2.0922,20,1.112),"BC":(0.0002,48,0.004),"A*":(0.1314,91,0.012)},
+     "BT":(11.2362,383211,0.002),"FC":(2.1293,20,1.112),"BC":(0.0002,48,0.004),"A*":(0.0661,95,0.005)},
 ]
 
 class BenchmarkTab(tk.Frame):
