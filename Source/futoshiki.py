@@ -397,63 +397,40 @@ def run_backward_chaining(grid, N, horiz, vert, query_i, query_j, query_v):
 
 
 def get_advanced_heuristic_mrv(grid, N, horiz, vert):
-    domains = {}
     empty_count = 0
-
-    # BƯỚC 1: Khởi tạo miền giá trị (Domain) bằng Forward Checking
-    for r in range(N):
-        for c in range(N):
-            if grid[r][c] == 0:
-                empty_count += 1
-                valid_vals = []
-                for v in range(1, N + 1):
-                    if is_safe(grid, r, c, v, N, horiz, vert):
-                        valid_vals.append(v)
-                
-                if not valid_vals:
-                    return float('inf'), None  # Vô nghiệm sớm
-                domains[(r, c)] = valid_vals
-
-    # BƯỚC 2: Rút gọn miền giá trị (Naked Singles)
-    changed = True
-    while changed:
-        changed = False
-        for (r, c), valid_vals in list(domains.items()):
-            if len(valid_vals) == 1:
-                fixed_val = valid_vals[0]
-                for (r2, c2) in domains:
-                    if (r2, c2) != (r, c) and (r2 == r or c2 == c):
-                        if fixed_val in domains[(r2, c2)]:
-                            domains[(r2, c2)].remove(fixed_val)
-                            changed = True
-                            if not domains[(r2, c2)]:
-                                return float('inf'), None
-
-    # BƯỚC 3: CẢI TIẾN TIE-BREAKER CHO FUTOSHIKI (Inequality Degree)
     min_options = float('inf')
     best_pos = None
     max_ineq_degree = -1
 
-    for pos, valid_vals in domains.items():
-        options = len(valid_vals)
-        r, c = pos
-        
-        # Đếm số lượng ràng buộc DẤU (<, >) chạm vào ô này
-        ineq_count = 0
-        if c > 0 and horiz[r][c-1] != 0: ineq_count += 1
-        if c < N-1 and horiz[r][c] != 0: ineq_count += 1
-        if r > 0 and vert[r-1][c] != 0: ineq_count += 1
-        if r < N-1 and vert[r][c] != 0: ineq_count += 1
+    # Chỉ dùng Forward Checking cơ bản để đếm MRV (không dùng AC-3)
+    for r in range(N):
+        for c in range(N):
+            if grid[r][c] == 0:
+                empty_count += 1
+                
+                # Đếm số lượng giá trị hợp lệ (MRV)
+                options = sum(1 for v in range(1, N + 1) if is_safe(grid, r, c, v, N, horiz, vert))
+                
+                if options == 0:
+                    return float('inf'), None  # Vô nghiệm sớm nếu có ô 0 lựa chọn
+                
+                # Đếm số lượng ràng buộc DẤU (<, >) chạm vào ô này (Inequality Degree)
+                ineq_count = 0
+                if c > 0 and horiz[r][c-1] != 0: ineq_count += 1
+                if c < N-1 and horiz[r][c] != 0: ineq_count += 1
+                if r > 0 and vert[r-1][c] != 0: ineq_count += 1
+                if r < N-1 and vert[r][c] != 0: ineq_count += 1
 
-        if options < min_options:
-            min_options = options
-            best_pos = pos
-            max_ineq_degree = ineq_count
-        elif options == min_options:
-            # Khi MRV hòa, BẮT BUỘC ưu tiên ô bị kẹp bởi nhiều dấu <, > hơn
-            if ineq_count > max_ineq_degree:
-                best_pos = pos
-                max_ineq_degree = ineq_count
+                # Chọn ô để mở rộng
+                if options < min_options:
+                    min_options = options
+                    best_pos = (r, c)
+                    max_ineq_degree = ineq_count
+                elif options == min_options:
+                    # TIE-BREAKER: Khi MRV hòa, BẮT BUỘC ưu tiên ô bị kẹp bởi nhiều dấu <, > hơn
+                    if ineq_count > max_ineq_degree:
+                        best_pos = (r, c)
+                        max_ineq_degree = ineq_count
 
     return empty_count, best_pos
 
