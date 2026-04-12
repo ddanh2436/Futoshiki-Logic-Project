@@ -1,10 +1,3 @@
-"""
-Futoshiki Solver — UI/UX Application
-Giao diện trực quan: từng bước giải + biểu đồ so sánh thuật toán
-Yêu cầu: Python 3.8+, tkinter (có sẵn), matplotlib
-Cài matplotlib nếu chưa có: pip install matplotlib
-"""
-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import threading
@@ -17,7 +10,6 @@ import os
 import glob
 from collections import defaultdict
 
-# ─── Matplotlib embed ────────────────────────────────────────────────────────
 import matplotlib
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
@@ -27,9 +19,6 @@ from matplotlib.patches import FancyBboxPatch
 import matplotlib.ticker as ticker
 import numpy as np
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# THEME & CONSTANTS
-# ═══════════════════════════════════════════════════════════════════════════════
 
 THEME = {
     "bg":          "#0F1117",
@@ -307,7 +296,7 @@ def get_advanced_heuristic_mrv(grid, N, horiz, vert):
                         valid_vals.append(v)
                 
                 if not valid_vals:
-                    return float('inf'), None  # Vô nghiệm sớm
+                    return float('inf'), None
                 domains[(r, c)] = valid_vals
 
     # BƯỚC 2: Rút gọn miền giá trị (Naked Singles)
@@ -333,8 +322,7 @@ def get_advanced_heuristic_mrv(grid, N, horiz, vert):
     for pos, valid_vals in domains.items():
         options = len(valid_vals)
         r, c = pos
-        
-        # Đếm số lượng ràng buộc DẤU (<, >) chạm vào ô này
+
         ineq_count = 0
         if c > 0 and horiz[r][c-1] != 0: ineq_count += 1
         if c < N-1 and horiz[r][c] != 0: ineq_count += 1
@@ -346,7 +334,6 @@ def get_advanced_heuristic_mrv(grid, N, horiz, vert):
             best_pos = pos
             max_ineq_degree = ineq_count
         elif options == min_options:
-            # Khi MRV hòa, BẮT BUỘC ưu tiên ô bị kẹp bởi nhiều dấu <, > hơn
             if ineq_count > max_ineq_degree:
                 best_pos = pos
                 max_ineq_degree = ineq_count
@@ -360,18 +347,15 @@ def run_astar_steps(initial_grid, N, horiz, vert, step_cb=None, stop_flag=None):
     pq = []
     tb = itertools.count()
     
-    # Thêm một tuple rỗng () ở cuối để lưu "hành động cuối cùng (last_move)"
     heapq.heappush(pq, (g0+h0, -g0, next(tb), initial_grid, mrv0, ()))
     nodes = 0
     
     while pq:
         if stop_flag and stop_flag[0]: return False, None, nodes
-        
-        # Bổ sung last_move khi lấy ra khỏi Queue
+
         f, neg_g, _, cur_grid, pos, last_move = heapq.heappop(pq)
         g = -neg_g; nodes += 1
-        
-        # UPDATE UI TẠI ĐÂY (Khi node thực sự được duyệt)
+
         if step_cb and last_move:
             step_cb("place", last_move[0], last_move[1], last_move[2], nodes, cur_grid)
             
@@ -386,7 +370,6 @@ def run_astar_steps(initial_grid, N, horiz, vert, step_cb=None, stop_flag=None):
                 child[r][c] = num
                 ch, cmrv = get_advanced_heuristic_mrv(child, N, horiz, vert)
                 if ch != float('inf'):
-                    # Lưu kèm hành động (r, c, num) vừa thực hiện để truyền xuống node con
                     heapq.heappush(pq, (g+1+ch, -(g+1), next(tb), child, cmrv, (r, c, num)))
                     
     return False, None, nodes
@@ -418,8 +401,8 @@ class FutoshikiBoard(tk.Canvas):
         self.horiz      = [[0]*(N-1) for _ in range(N)]
         self.vert       = [[0]*N for _ in range(N-1)]
         self.given_cells = set()
-        self.highlight   = None   # (r,c) ô đang được đặt
-        self.hl_type     = None   # "place" | "backtrack"
+        self.highlight   = None
+        self.hl_type     = None
         self.cell_ids    = {}
         self.draw_board()
 
@@ -450,7 +433,6 @@ class FutoshikiBoard(tk.Canvas):
                 x0, y0 = x - C//2, y - C//2
                 x1, y1 = x + C//2, y + C//2
 
-                # Màu ô
                 if self.highlight == (r, c):
                     fill = THEME["accent"] if self.hl_type == "place" else THEME["red"]
                     fill_dark = fill
@@ -461,7 +443,6 @@ class FutoshikiBoard(tk.Canvas):
                     fill = THEME["surface2"]
                     fill_dark = THEME["surface2"]
 
-                # Bo góc
                 self.create_rectangle(x0+4, y0, x1-4, y1, fill=fill, outline="", width=0)
                 self.create_rectangle(x0, y0+4, x1, y1-4, fill=fill, outline="", width=0)
                 self.create_oval(x0, y0, x0+8, y0+8, fill=fill, outline="")
@@ -483,7 +464,6 @@ class FutoshikiBoard(tk.Canvas):
                         font = ("Consolas", 18, "bold")
                     self.create_text(x, y, text=str(val), fill=color, font=font)
 
-        # Vẽ ràng buộc ngang
         for r in range(N):
             for c in range(N-1):
                 con = self.horiz[r][c]
@@ -495,7 +475,6 @@ class FutoshikiBoard(tk.Canvas):
                 self.create_text(mx, y1, text=sym, fill=THEME["yellow"],
                                  font=("Consolas", 13, "bold"))
 
-        # Vẽ ràng buộc dọc
         for r in range(N-1):
             for c in range(N):
                 con = self.vert[r][c]
@@ -619,12 +598,12 @@ class SolverTab(tk.Frame):
         self.horiz = [[0]*3 for _ in range(4)]
         self.vert  = [[0]*4 for _ in range(3)]
         self.current_file = None
-        self.file_list    = []          # danh sách tất cả files tìm được
+        self.file_list    = []
         self.running      = False
         self.solve_all_mode = False
         self.stop_flag    = [False]
         self.speed        = 30
-        self._file_row_widgets = {}     # path -> frame widget trong list
+        self._file_row_widgets = {}    
         self._build_ui()
         self._auto_discover_files()
 
@@ -658,7 +637,6 @@ class SolverTab(tk.Frame):
 
     # ── BUILD UI ────────────────────────────────────────────────────────────
     def _build_ui(self):
-        # ── Header ──
         hdr = tk.Frame(self, bg=THEME["bg"])
         hdr.pack(fill="x", padx=16, pady=(14,6))
         tk.Label(hdr, text="FUTOSHIKI", font=("Consolas", 22, "bold"),
@@ -667,11 +645,9 @@ class SolverTab(tk.Frame):
                  bg=THEME["bg"], fg=THEME["text"]).pack(side="left")
         self._btn(hdr, "📂 Open Folder", self._open_folder, THEME["surface2"]).pack(side="right", padx=3)
 
-        # ── Controls row ──
         ctrl_wrap = tk.Frame(self, bg=THEME["bg"])
         ctrl_wrap.pack(fill="x", padx=16, pady=(0,6))
 
-        # Algo buttons
         tk.Label(ctrl_wrap, text="Algorithm:", font=FONT_BODY,
                  bg=THEME["bg"], fg=THEME["text_muted"]).pack(side="left", padx=(0,6))
         self.algo_var = tk.StringVar(value="A*")
@@ -685,7 +661,6 @@ class SolverTab(tk.Frame):
                            bd=1, cursor="hand2",
                            command=self._algo_changed).pack(side="left", padx=2)
 
-        # Speed
         tk.Label(ctrl_wrap, text="  Speed:", font=FONT_BODY,
                  bg=THEME["bg"], fg=THEME["text_muted"]).pack(side="left", padx=(10,4))
         self.speed_var = tk.IntVar(value=30)
@@ -697,7 +672,6 @@ class SolverTab(tk.Frame):
         tk.Label(ctrl_wrap, text="S←→F", font=FONT_SMALL,
                  bg=THEME["bg"], fg=THEME["text_dim"]).pack(side="left", padx=4)
 
-        # Action buttons
         self.btn_solve     = self._btn(ctrl_wrap, "▶ Solve",     self._start_solve,    THEME["accent"], fg="#000")
         self.btn_solve_all = self._btn(ctrl_wrap, "⏭ Solve All", self._start_solve_all, "#1D4ED8")
         self.btn_stop      = self._btn(ctrl_wrap, "■ Stop",      self._stop,            THEME["red"])
@@ -705,21 +679,18 @@ class SolverTab(tk.Frame):
         for b in [self.btn_solve, self.btn_solve_all, self.btn_stop, self.btn_reset]:
             b.pack(side="left", padx=3)
 
-        # BC note
         self.bc_note = tk.Label(self, text="", font=FONT_SMALL,
                                 bg=THEME["bg"], fg=THEME["text_muted"],
                                 wraplength=900, justify="left")
         self.bc_note.pack(fill="x", padx=16, pady=(0,4))
 
-        # ── Body: file list | board | log ──
         body = tk.Frame(self, bg=THEME["bg"])
         body.pack(fill="both", expand=True, padx=16, pady=(0,14))
-        body.columnconfigure(0, weight=0)   # file list
-        body.columnconfigure(1, weight=0)   # board
-        body.columnconfigure(2, weight=1)   # right panel
+        body.columnconfigure(0, weight=0)
+        body.columnconfigure(1, weight=0)
+        body.columnconfigure(2, weight=1)
         body.rowconfigure(0, weight=1)
 
-        # ── File list panel ──
         fl_wrap = tk.Frame(body, bg=THEME["surface"], width=170)
         fl_wrap.grid(row=0, column=0, sticky="nsew", padx=(0,10))
         fl_wrap.pack_propagate(False)
@@ -747,13 +718,11 @@ class SolverTab(tk.Frame):
         fl_canvas.bind("<Configure>",
             lambda e: fl_canvas.itemconfig(self.fl_canvas_win, width=e.width))
 
-        # ── Board ──
         board_wrap = tk.Frame(body, bg=THEME["surface"])
         board_wrap.grid(row=0, column=1, sticky="n", padx=(0,10))
         self.board = FutoshikiBoard(board_wrap, N=self.N)
         self.board.pack(padx=10, pady=10)
 
-        # ── Right: stats + log ──
         right = tk.Frame(body, bg=THEME["bg"])
         right.grid(row=0, column=2, sticky="nsew")
         right.rowconfigure(1, weight=1)
@@ -804,7 +773,6 @@ class SolverTab(tk.Frame):
             row = tk.Frame(self.fl_inner, bg=THEME["surface"], cursor="hand2")
             row.pack(fill="x", pady=1)
 
-            # Status dot (●)
             dot = tk.Label(row, text="●", font=("Consolas", 8),
                            bg=THEME["surface"], fg=THEME["text_dim"], padx=4)
             dot.pack(side="left")
@@ -814,7 +782,6 @@ class SolverTab(tk.Frame):
                            anchor="w", padx=4, pady=5)
             lbl.pack(side="left", fill="x", expand=True)
 
-            # Click → select
             for w in (row, dot, lbl):
                 w.bind("<Button-1>", lambda e, p=path: self._select_file(p))
                 w.bind("<Enter>",    lambda e, r=row: r.config(bg=THEME["surface2"]))
@@ -826,7 +793,6 @@ class SolverTab(tk.Frame):
     def _select_file(self, path):
         """Load file và highlight row đang chọn."""
         if self.running: return
-        # Reset style tất cả rows
         for p, w in self._file_row_widgets.items():
             is_sel = (p == path)
             w["row"].config(bg=THEME["accent"] if is_sel else THEME["surface"])
@@ -888,7 +854,6 @@ class SolverTab(tk.Frame):
         self.solve_all_mode = True
         self.stop_flag = [False]
         self.running   = True
-        # Reset tất cả dot về pending
         for p in self._file_row_widgets:
             self._set_file_status(p, "pending")
         algo = self.algo_var.get()
@@ -906,18 +871,13 @@ class SolverTab(tk.Frame):
                 self.after(0, lambda p=path, e=e:
                            self.log.log(f"✗ {os.path.basename(p)}: {e}", "backtrack"))
                 continue
-            # Select + highlight file đang chạy
             self.after(0, lambda p=path, n=N, g=grid_o, h=horiz, v=vert:
                        self._switch_to_file(p, n, g, h, v))
-            # Đợi UI cập nhật
             time.sleep(0.05)
             self.after(0, lambda p=path: self._set_file_status(p, "running"))
-            # Chạy thuật toán (sync, trong thread này)
             self._solve_one(path, N, grid_o, horiz, vert, algo, visual=True)
-            # Chờ animation xong trước khi qua file tiếp
             while self.running and not self.stop_flag[0]:
                 time.sleep(0.05)
-                # running sẽ được set False bởi _finish_one() khi xong
                 break
 
         self.after(0, lambda: setattr(self, 'running', False))
@@ -983,7 +943,6 @@ class SolverTab(tk.Frame):
                     self.after(0, lambda g=final_grid: self.board.show_final(g))
 
             elif algo == "BC":
-                # Tìm 1 ô trống đầu tiên để Query
                 ti, tj = -1, -1
                 for row in range(N):
                     for col in range(N):
@@ -1004,10 +963,9 @@ class SolverTab(tk.Frame):
                 tag = "done" if valid_vals else "backtrack"
                 self.after(0, lambda m=msg, t=tag: self.log.log(m, t))
                 
-                # Để hiển thị nghiệm cuối cùng lên UI, ta mượn A* giải nhanh phần còn lại
                 g2 = copy.deepcopy(grid_o)
                 _, final_grid, _ = run_astar_steps(g2, N, horiz, vert)
-                nodes = total_nodes # Trả về số node suy diễn của BC để hiển thị Stats
+                nodes = total_nodes
 
             elif algo == "A*":
                 res, final_grid, nodes = run_astar_steps(
@@ -1063,8 +1021,6 @@ class SolverTab(tk.Frame):
 # TAB 2: BENCHMARK & BIỂU ĐỒ SO SÁNH
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Số liệu đã được cập nhật từ kết quả Benchmark với A* tối ưu mới nhất!
-# Cập nhật vào futoshiki_ui.py (Phần Tab 2)
 BENCHMARK_DATA = [
     {"file":"input-01","N":4,"sol":True,
      "BT":(0.0019,17,0.001),"FC":(0.0035,1,0.035),"BC":(0.0001,21,0.002),"A*":(0.0016,13,0.001)},
@@ -1103,12 +1059,10 @@ class BenchmarkTab(tk.Frame):
         tk.Label(hdr, text="  Dữ liệu thực — 10 test cases, N ∈ {4,5,6,7,9}",
                  font=FONT_SMALL, bg=THEME["bg"], fg=THEME["text_dim"]).pack(side="left", padx=10)
 
-        # Re-run button
         tk.Button(hdr, text="⟳  Re-run Benchmark", command=self._rerun,
                   font=FONT_BODY, bg=THEME["surface2"], fg=THEME["text"],
                   relief="flat", padx=12, pady=6, cursor="hand2").pack(side="right")
 
-        # Notebook: Charts / Table
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=20, pady=(8,16))
 
@@ -1136,8 +1090,7 @@ class BenchmarkTab(tk.Frame):
         markers = ["o","s","^","D"]
 
         idx = list(range(len(data)))
-
-        # ── Chart 1: Runtime ──
+        
         ax1 = fig.add_subplot(gs[0, 0])
         for i, algo in enumerate(algos):
             vals = [max(d[algo][0], 1e-5) for d in data]
@@ -1147,7 +1100,6 @@ class BenchmarkTab(tk.Frame):
                          label=algo, dashes=dashes[i] or (None,None))
         self._style_ax(ax1, "Runtime (seconds) — log scale", "Seconds (log)", labels)
 
-        # ── Chart 2: Nodes ──
         ax2 = fig.add_subplot(gs[0, 1])
         for i, algo in enumerate(algos):
             vals = [max(d[algo][1], 0.5) for d in data]
@@ -1157,7 +1109,6 @@ class BenchmarkTab(tk.Frame):
                          dashes=dashes[i] or (None,None), label=algo)
         self._style_ax(ax2, "Nodes Expanded — log scale", "Nodes (log)", labels)
 
-        # ── Chart 3: RAM ──
         ax3 = fig.add_subplot(gs[1, 0])
         for i, algo in enumerate(algos):
             vals = [d[algo][2] for d in data]
@@ -1167,7 +1118,6 @@ class BenchmarkTab(tk.Frame):
                      dashes=dashes[i] or (None,None), label=algo)
         self._style_ax(ax3, "Peak RAM (MB) — linear", "MB", labels)
 
-        # ── Chart 4: Bar — Runtime tổng hợp nhóm ──
         ax4 = fig.add_subplot(gs[1, 1])
         x = np.arange(len(data))
         w = 0.18
@@ -1179,7 +1129,6 @@ class BenchmarkTab(tk.Frame):
         ax4.set_yscale("log")
         self._style_ax(ax4, "Runtime comparison — grouped bar", "Seconds (log)", labels)
 
-        # Legend chung
         handles, lbl = ax1.get_legend_handles_labels()
         fig.legend(handles, lbl, loc="upper center", ncol=4,
                    frameon=False, fontsize=9,
@@ -1202,7 +1151,6 @@ class BenchmarkTab(tk.Frame):
             spine.set_color(THEME["border"])
 
     def _build_table(self):
-        # Scrollable table
         container = tk.Frame(self.table_frame, bg=THEME["bg"])
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
@@ -1219,7 +1167,6 @@ class BenchmarkTab(tk.Frame):
         canvas.create_window((0,0), window=inner, anchor="nw")
         inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
-        # Header
         cols = ["File","N","Nghiệm",
                 "BT T(s)","BT Nodes","BT RAM",
                 "FC T(s)","FC Nodes","FC RAM",
@@ -1239,7 +1186,6 @@ class BenchmarkTab(tk.Frame):
         for ri, d in enumerate(BENCHMARK_DATA):
             row_bg = THEME["surface"] if ri % 2 == 0 else THEME["surface2"]
 
-            # Winner
             times = {"BT": d["BT"][0], "FC": d["FC"][0], "A*": d["A*"][0]}
             winner = min(times, key=times.get)
             winner_color = ALGO_COLORS[winner]
@@ -1272,7 +1218,6 @@ class BenchmarkTab(tk.Frame):
                          width=w//7, relief="flat", pady=6, padx=4,
                          anchor="center").grid(row=ri+1, column=ci, padx=1, pady=0, sticky="nsew")
 
-        # Footer note
         note = ("* BC chỉ đo suy diễn 1 ô mồi — không phải solver hoàn chỉnh.  "
                 "Input-06 & Input-08: bảng vô nghiệm.  "
                 "Đo bằng tracemalloc (RAM) và time.perf_counter() (time).")
@@ -1303,15 +1248,14 @@ class FutoshikiApp(tk.Tk):
 
     def _on_closing(self):
         try:
-            # Ép cờ dừng (stop_flag) thành True để ngắt ngay lập tức các thuật toán đang chạy
             if hasattr(self, 'solver_tab'):
                 self.solver_tab.stop_flag[0] = True
                 self.solver_tab.running = False
         except Exception:
             pass
         
-        self.destroy()   # Đóng giao diện an toàn
-        os._exit(0)  # Force exit để đảm bảo tất cả threads con bị dừng
+        self.destroy()
+        os._exit(0)
 
     def _apply_ttk_style(self):
         style = ttk.Style(self)
@@ -1329,7 +1273,6 @@ class FutoshikiApp(tk.Tk):
                                ("active",   THEME["text"])])
 
     def _build_ui(self):
-        # Title bar
         title_bar = tk.Frame(self, bg=THEME["surface"], height=48)
         title_bar.pack(fill="x")
         title_bar.pack_propagate(False)
@@ -1343,7 +1286,6 @@ class FutoshikiApp(tk.Tk):
                  font=FONT_SMALL,
                  bg=THEME["surface"], fg=THEME["text_dim"]).pack(side="right", padx=20)
 
-        # Tabs
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True)
 
@@ -1357,9 +1299,7 @@ class FutoshikiApp(tk.Tk):
                                 font=FONT_SMALL, bg=THEME["surface"],
                                 fg=THEME["text_dim"], anchor="w", padx=16, pady=5)
         self.status.pack(fill="x", side="bottom")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
+        
 if __name__ == "__main__":
     app = FutoshikiApp()
     app.mainloop()
