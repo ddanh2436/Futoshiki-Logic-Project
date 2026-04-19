@@ -48,17 +48,6 @@ CÁCH 2: Chạy Chế độ Terminal (Dùng để Benchmark toàn bộ test case
   + Chương trình sẽ đọc tất cả các file "input-*.txt" trong thư mục Inputs/.
   + Chạy ngầm cả 4 thuật toán để đo lường Thời gian, RAM, và số Nodes.
   + Ghi kết quả ma trận giải được (bằng thuật toán A*) ra thư mục Outputs/.
-
-
-4. CẤU TRÚC THƯ MỤC
--------------------
-Group07/
- ├── Docs/
- │    └── Report.pdf              : Báo cáo đồ án của nhóm
- └── Source/
-      ├── Inputs/                 : Chứa 10 file đầu vào (input-01.txt ...)
-      ├── Outputs/                : Chứa 10 file đầu ra (output-01.txt ...)
-      ├── futoshiki.py            : Code chính chạy thuật toán & sinh Output
       ├── futoshiki_ui.py         : Code giao diện đồ họa (Visualizer & Charts)
       ├── requirements.txt        : Khai báo thư viện cần thiết
       └── README.txt              : File hướng dẫn này
